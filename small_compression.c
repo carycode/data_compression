@@ -68,7 +68,9 @@ int byte_to_context( char byte ){
     // "clever" code that assumes num_contexts is a power of 2.
     return (byte bitand (num_contexts-1));
 }
+/*
 int next_word_index[num_contexts] = {0};
+*/
 
 #define word_indexes (256)
 /*
@@ -129,9 +131,14 @@ typedef struct Word_in_byte_dictionary_type {
 } Word_in_byte_dictionary_type;
 
 #define dictionary_indexes (0x7f)
+/*
 Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+*/
 
-void initialize_dictionary(){
+void initialize_dictionary(
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
+    int next_word_index[num_contexts]
+){
     int context=0;
     for( context=0; context<num_contexts; context++ ){
         int index=0;
@@ -155,21 +162,90 @@ void initialize_dictionary(){
     };
 }
 
-
-void
-debug_print_substring( const char * source, int bytes ){
-    int i=0;
-    putchar( '(' );
-    // print N bytes
-    for( ; i<bytes; i++ ){
-        putchar( source[i] );
+void print_as_c_literal( const char * s, int length ){
+    bool avoid_hex_digit = false;
+    // Would it be better to use full 3-digit octal escapes
+    // rather than hex escapes
+    // so we don't have to handle the special case
+    // when the following character is also a hex digit?
+    int line_length = 0;
+    int i = 0;
+    putchar('"');
+    for( ; i < length; i++ ){
+        if( 70 <= line_length ){
+            printf( "\"\n  \"" );
+            line_length = 3;
+            avoid_hex_digit = false;
+        };
+        char c = *s++;
+        if( '"' == c ){
+            printf( "\\"  "\"" );
+            line_length += 2;
+            avoid_hex_digit = false;
+        }else if( '\\' == c ){
+            printf( "\\"  "\\" );
+            line_length += 2;
+            avoid_hex_digit = false;
+        }else if(avoid_hex_digit and isxdigit(c) ){
+            // Sometimes the C compiler will eat more than 2 hex digits
+            // after a "\x" hex escape code in a C string. See
+            // http://stackoverflow.com/questions/2735101/number-of-digits-in-a-hex-escape-code-in-c-c
+            putchar( '"' );
+            putchar( ' ' );
+            putchar( '"' );
+            putchar(c);
+            line_length += 4;
+            avoid_hex_digit = false;
+        }else if(isprint(c)){
+            /*
+            All isprint() characters can represent themselves in a C string,
+            except for the above 3 special cases.
+            */
+            putchar(c);
+            line_length++;
+            avoid_hex_digit = false;
+        }else if( '\n' == c ){
+            printf( "\\"  "n" );
+            line_length += 2;
+            avoid_hex_digit = false;
+        }else if( '\t' == c ){
+            printf( "\\"  "t" );
+            line_length += 2;
+            avoid_hex_digit = false;
+        }else{
+            /* This hexadecimal escape case can handle *every* byte,
+            including the NULL character.
+            even if we are currently avoiding hex digits.
+            The above special cases are just to make
+            the output printed source code more human-readable;
+            if we eliminated all those special cases
+            and always used the hexadecimal escape or octal escape
+            for every byte,
+            the resulting compiled executable file would be identical.
+            */
+            printf( "\\"  "x%x%x", ((c >> 4) & 0xf), (c & 0xf) );
+            line_length += 4;
+            avoid_hex_digit = true;
+        };
     };
-    putchar( ')' );
+    putchar('"');
 }
 
+/*
+print compressed text (or other arbitrary byte string)
+for use in, for example, Arduino source code.
+*/
+void print_as_c_string( const char * s, int length ){
+    printf( "char compressed_data = \n" );
+    print_as_c_literal( s, length );
+    printf( " /* %i bytes. */\n", length );
+};
 
 // returns the number of bytes written to dest.
-int decompress_byte_index( const int context, int index, char * dest ){
+int decompress_byte_index(
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
+    const int context, int index, char * dest
+){
     char reversed_word[128];
     int i=0;
     assert( 0x00 != index );
@@ -211,7 +287,10 @@ int decompress_byte_index( const int context, int index, char * dest ){
 };
 
 void
-debug_print_dictionary_entry( int context, int index ){
+debug_print_dictionary_entry(
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
+    int context, int index
+){
         // picking only the lower 5 bits
         // as the context means that
         // we don't know exactly the full byte context ...
@@ -223,7 +302,7 @@ debug_print_dictionary_entry( int context, int index ){
             // int value = index | 0x80;
                 char dest[256]; // longer than the longest possible string.
                 Word_in_byte_dictionary_type word = dictionary[context][index-0x80];
-                int bytes = decompress_byte_index( context, index, dest );
+                int bytes = decompress_byte_index( dictionary, context, index, dest );
                 if( (2 == bytes) and
                     ( (unsigned char)dest[0] == ' ' ) and
                     ( (unsigned char)dest[1] == index - 0x80 )
@@ -232,16 +311,9 @@ debug_print_dictionary_entry( int context, int index ){
                 }else{
                     printf( "index: 0x%x ", index );
                     printf( "[0x%x = %c]", context, context_letter);
-                    if(isprint( dest[0] )){
-                        dest[bytes] = '\0';
-                        printf( "[%s]", dest );
-                    }else{
-                        printf( "<>(0x%x 0x%x ... %d)",
-                            (unsigned char)(dest[0]),
-                            (unsigned char)(dest[1]),
-                            bytes
-                            );
-                    };
+                    putchar('[');
+                    print_as_c_literal( dest, bytes );
+                    putchar(']');
                     if( word.recently_used ){ printf( "(recent)" ); };
                     int prefix_index = word.prefix_word_index;
                     assert( 0 < prefix_index );
@@ -255,19 +327,21 @@ debug_print_dictionary_entry( int context, int index ){
 };
 
 void
-debug_print_dictionary_contents(){
+debug_print_dictionary_contents(
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes]
+){
     printf( "decompression dictionary: \n" );
     int context = 0;
     for( context=0; context<num_contexts; context++ ){
         int index = 0;
         for( index=0x80; index<(0x80+dictionary_indexes); index++ ){
-            debug_print_dictionary_entry( context, index );
+            debug_print_dictionary_entry( dictionary, context, index );
         };
     };
 }
 
 void
-increment_dictionary_index( context ){
+increment_dictionary_index( int context, int next_word_index[num_contexts] ){
     // FIXME: loop until we hit a leaf node.
     int i = next_word_index[context] + 1;
     if( dictionary_indexes <= i ){
@@ -280,8 +354,13 @@ Given the context and index of 2 consecutive indexes
 in the compressed text.
 */
 void
-update_dictionary(int context, int index, int next_context, int next_index){
+update_dictionary(
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
+    int context, int index, int next_context, int next_index, int tochange
+){
+    /*
     int tochange = next_word_index[context];
+    */
     unsigned char first_byte_of_next_word = 0xff;
 
     bool special_case = (tochange == next_index) and (context = next_context);
@@ -325,7 +404,6 @@ update_dictionary(int context, int index, int next_context, int next_index){
     if( index >= 0x80 ){
         dictionary[context][index - 0x80].leaf = false;
     };
-    increment_dictionary_index( context );
 }
 
 /*
@@ -345,9 +423,11 @@ void decompress_bytestring( const char * source, char * dest_original ){
     printf( "compressed_length: %zi.\n", compressed_length );
     int compression_type = *source++;
     if( EIGHT_BIT_PRUNED == compression_type ){
-        initialize_dictionary();
+        int next_word_index[num_contexts] = {0};
+        Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+        initialize_dictionary( dictionary, next_word_index );
         printf("dictionary after first initialization:\n");
-        debug_print_dictionary_contents();
+        debug_print_dictionary_contents(dictionary);
         // first byte copied unchanged, in order to provide context
         int previous_index = (unsigned char)source[0];
         printf( "'%c': (%c)", source[0], source[0] );
@@ -364,14 +444,13 @@ void decompress_bytestring( const char * source, char * dest_original ){
                *would* have used *that* word if it had been available,
                so clearly that word is *not* already in the dictionary.
             */
-            update_dictionary(previous_context, previous_index, context, index);
-            int bytes = decompress_byte_index( context, index, dest );
-            if( isprint( index ) ){
-                printf( "'%c': ", source[0] );
-            }else{
-                printf( "0x%x:", source[0] );
-            };
-            debug_print_substring( dest, bytes);
+            int tochange = next_word_index[context];
+            update_dictionary(dictionary, previous_context, previous_index, context, index, tochange);
+            increment_dictionary_index( context, next_word_index );
+            int bytes = decompress_byte_index( dictionary, context, index, dest );
+            print_as_c_literal( source, 1 );
+            printf(": ");
+            print_as_c_literal(dest, bytes);
             putchar('\n');
             assert( 1 <= bytes );
             
@@ -379,7 +458,7 @@ void decompress_bytestring( const char * source, char * dest_original ){
             previous_context = context;
             previous_index = index;
         };
-        debug_print_dictionary_contents();
+        debug_print_dictionary_contents(dictionary);
     }else if( LITERAL == compression_type ){
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
@@ -448,7 +527,7 @@ compress_byte_index(
     }else{
         assert( 1 == bytes_eaten );
     };
-    increment_dictionary_index( context );
+    increment_dictionary_index( context, next_word_index );
     return bytes_eaten;
 };
 
@@ -485,16 +564,18 @@ void compress_bytestring( const char * source_original, char * dest_original){
 
     initialize_compression_dictionary( compression_table );
 
-    initialize_dictionary();
+    int next_word_index[num_contexts] = {0};
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+    initialize_dictionary(dictionary, next_word_index);
     printf("dictionary after first initialization:\n");
-    debug_print_dictionary_contents();
+    debug_print_dictionary_contents(dictionary);
     printf("compressing ...\n");
 
     *dest++ = compression_type;
     source = source_original;
     // first byte copied unchanged, in order to provide context
     *dest++ = *source++;
-    int previous_context = 0;
+    // int previous_context = 0;
     while( *source ){ // assume null-terminated string -- is this wise?
         int context = byte_to_context( source[-1] );
         int bytes = compress_byte_index(
@@ -508,13 +589,15 @@ void compress_bytestring( const char * source_original, char * dest_original){
         maintain a dictionary synchronized with the decompressor,
         or find some other way to prune and re-use dictionary indexes
         in a compatible way.
-        update_dictionary(previous_context, previous_index, context, index);
+        int tochange = next_word_index[context];
+        update_dictionary(previous_context, previous_index, context, index, tochange);
+        increment_dictionary_index( context );
         */
         // each compressed index uses 1 byte
         assert( 256 >= word_indexes );
         dest++;
 
-        debug_print_substring( source, bytes );
+        print_as_c_literal( source, bytes );
         assert( 1 <= bytes );
         if( dest[-1] bitand 0x80 ){
             assert( 1 < bytes );
@@ -522,11 +605,11 @@ void compress_bytestring( const char * source_original, char * dest_original){
             assert( 1 == bytes );
         };
         source += bytes;
-        previous_context = context;
+        // previous_context = context;
     };
     *dest = '\0'; // null termination.
     printf("table after some compression:\n");
-    debug_print_dictionary_contents();
+    debug_print_dictionary_contents(dictionary);
 
     size_t source_length = strlen( source_original );
     printf( "source_length: %zi.\n", source_length );
@@ -565,7 +648,7 @@ test_compress_byte_index(
         bytes_eaten = 2;
     };
     *dest = selected_index;
-    increment_dictionary_index( context );
+    increment_dictionary_index( context, next_word_index );
     return bytes_eaten;
 };
 
@@ -576,7 +659,9 @@ void test_compress_bytestring( const char * source_original, char * dest_origina
 
     printf("quick test, using a hard-wired dictionary.\n");
 
-    initialize_dictionary();
+    int next_word_index[num_contexts] = {0};
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+    initialize_dictionary( dictionary, next_word_index );
     printf("dictionary after first initialization:\n");
     /*
     debug_print_dictionary_contents();
@@ -587,7 +672,7 @@ void test_compress_bytestring( const char * source_original, char * dest_origina
     source = source_original;
     // first byte copied unchanged, in order to provide context
     *dest++ = *source++;
-    int previous_context = 0;
+    // int previous_context = 0;
     while( *source ){ // assume null-terminated string -- is this wise?
         int context = byte_to_context( dest[-1] );
         int bytes = test_compress_byte_index(
@@ -599,7 +684,7 @@ void test_compress_bytestring( const char * source_original, char * dest_origina
         assert( 256 >= word_indexes );
         dest++;
 
-        debug_print_substring( source, bytes );
+        print_as_c_literal( source, bytes );
         assert( 1 <= bytes );
         if( dest[-1] bitand 0x80 ){
             assert( 1 < bytes );
@@ -607,7 +692,7 @@ void test_compress_bytestring( const char * source_original, char * dest_origina
             assert( 1 == bytes );
         };
         source += bytes;
-        previous_context = context;
+        // previous_context = context;
     };
     *dest = '\0'; // null termination.
     /*
@@ -662,7 +747,7 @@ is, say, 32 indexes, it really only needs to be 32 indexes long.
 
 Word_in_nybble_table_type table[num_contexts][word_indexes] = { };
 
-void initialize_table(){
+void initialize_table( int next_word_index[num_contexts] ){
     /* Initialize so that normal ASCII text
        (which occasionally uses carriage return 0x0D and line feed 0x0A)
        can be (initially) represented by itself.
@@ -783,7 +868,7 @@ where 0x81 is always hard-wired to represent 0x01.
 (perhaps 0x10 + low_nybble,
 so the bytes 0x10..0x1f always represent a nybble of an expanded literal byte;
 if the plaintext only contains normal 7-bit ASCII text,
-and we hardwired the low-ADCII isprint+DEL+CR+NL to represent themselves,
+and we hardwired the low-ASCII isprint+DEL+CR+NL to represent themselves,
 then none of the bytes 0x00 or 0x10..0x1f should ever occur in the compressed text.
 and the high-bit-set bytes always represent words longer than 1 byte.
 )
@@ -1008,6 +1093,7 @@ contains only the characters
 that represent themselves in a C string --
 i.e., the isprint() characters, minus quote, minus backslash.
 (Perhaps only base64url characters for simplicity?)
+(Perhaps only characters used in Z85, the ZeroMQ base-85 encoding algorithm?)
 
 (3)
 
@@ -1193,15 +1279,9 @@ debug_print_table_contents(){
                 }else{
                     printf( "index: 0x%x ", index );
                     printf( "[0x%x = %c]", context, context_letter);
-                    if(isprint( dest[0] )){
-                        printf( "[%s]", dest );
-                    }else{
-                        printf( "<>(0x%x 0x%x ... %d)",
-                            (unsigned char)(dest[0]),
-                            (unsigned char)(dest[1]),
-                            nybbles
-                            );
-                    };
+                    putchar('[');
+                    print_as_c_literal( dest, (nybbles+1)/2 );
+                    putchar(']');
                     Word_in_nybble_table_type word = table[context][index];
                     assert( 0 == word.next_index );
                     if( word.recently_used ){ printf( "(recent)" ); };
@@ -1215,7 +1295,7 @@ debug_print_table_contents(){
 }
 
 void
-increment_table_index( int context ){
+increment_table_index( int context, int next_word_index[num_contexts]  ){
     /*
     Normally this is simply
         next_word_index[context]++;
@@ -1275,8 +1355,10 @@ Given the context and index of 2 consecutive indexes
 in the compressed text.
 */
 void
-update_table(int context, int index, int next_context, int next_index){
+update_table(int context, int index, int next_context, int next_index, int tochange){
+    /*
     int tochange = next_word_index[context];
+    */
 
     if( tochange != next_index ){
         // normal case
@@ -1312,7 +1394,6 @@ update_table(int context, int index, int next_context, int next_index){
     table[context][tochange].last_letter = first_nybble_of_next_word;
     table[context][index].leaf = false;
 
-    increment_table_index( context );
 }
 
 void decompress( const char * source, char * dest_original ){
@@ -1322,7 +1403,8 @@ void decompress( const char * source, char * dest_original ){
     int compression_type = *source++;
     if( EIGHT_BIT_PRUNED == compression_type ){
         /* FIXME: */
-        initialize_table();
+        int next_word_index[num_contexts] = {0};
+        initialize_table( next_word_index );
         bool nybble_offset = 0;
         int previous_index = source[0];
         // first byte copied unchanged, in order to provide context
@@ -1342,7 +1424,9 @@ void decompress( const char * source, char * dest_original ){
                Add entry just before decompressing it,
                to handle the LZW special case.
             */
-            update_table(previous_context, previous_index, context, index);
+            int tochange = next_word_index[context];
+            update_table(previous_context, previous_index, context, index, tochange);
+            increment_table_index( context, next_word_index );
             int nybbles = decompress_index( context, index, dest, nybble_offset );
             assert( 1 <= nybbles );
 
@@ -1452,7 +1536,7 @@ compress_index(
         next_index = compression_table[context][selected_index][nybble];
     }while( next_index );
     *dest = selected_index;
-    increment_table_index( context );
+    increment_table_index( context, next_word_index );
     return nybbles_eaten;
 };
 
@@ -1475,7 +1559,8 @@ void compress( const char * source_original, char * dest_original ){
 
     int compression_table[num_contexts][word_indexes][16] = { };
 
-    initialize_table();
+    int next_word_index[num_contexts] = {0};
+    initialize_table( next_word_index );
     printf("table after first initialization:\n");
     debug_print_table_contents();
     printf("compressing ...\n");
@@ -1486,7 +1571,7 @@ void compress( const char * source_original, char * dest_original ){
         // first byte copied unchanged, in order to provide context
         *dest++ = *source++;
         bool nybble_offset = 0;
-        int previous_context = 0;
+        // int previous_context = 0;
         while( *source ){ // assume null-terminated string -- is this wise?
             int context = byte_to_context( dest[-1] );
             int nybbles = compress_index(
@@ -1503,7 +1588,7 @@ void compress( const char * source_original, char * dest_original ){
             assert( 1 <= nybbles );
             source += ((nybbles+nybble_offset) >> 1);
             nybble_offset ^= (nybbles bitand 1);
-            previous_context = context;
+            // previous_context = context;
         };
     *dest = '\0'; // null termination.
     printf("table after some compression:\n");
@@ -1540,7 +1625,7 @@ test_byte_compress_index(
     int context, const char * source, char * dest, bool original_nybble_offset
 ){
     *dest = *source;
-    increment_table_index( context );
+    increment_table_index( context, next_word_index );
     return 2;
 };
 
@@ -1552,7 +1637,8 @@ test_byte_compress( const char * source_original, char * dest_original ){
 
     int compression_table[num_contexts][word_indexes][16] = { };
 
-    initialize_table();
+    int next_word_index[num_contexts] = {0};
+    initialize_table( next_word_index );
     printf("table after first initialization:\n");
     debug_print_table_contents();
     printf("compressing ...\n");
@@ -1563,7 +1649,7 @@ test_byte_compress( const char * source_original, char * dest_original ){
         // first byte copied unchanged, in order to provide context
         *dest++ = *source++;
         bool nybble_offset = 0;
-        int previous_context = 0;
+        // int previous_context = 0;
         while( *source ){ // assume null-terminated string -- is this wise?
             int context = byte_to_context( dest[-1] );
             int nybbles = test_byte_compress_index(
@@ -1580,7 +1666,7 @@ test_byte_compress( const char * source_original, char * dest_original ){
             assert( 1 <= nybbles );
             source += ((nybbles+nybble_offset) >> 1);
             nybble_offset ^= (nybbles bitand 1);
-            previous_context = context;
+            // previous_context = context;
         };
     *dest = '\0'; // null termination.
     printf("table after some compression:\n");
@@ -1622,6 +1708,7 @@ void test_nybble_compress( const char * source_original, char * dest_original ){
     const char * source = source_original;
     char * dest = dest_original;
     int compression_type = EIGHT_BIT_PRUNED;
+    int next_word_index[num_contexts] = {0};
 
     *dest++ = compression_type;
     /* FIXME: implement */
@@ -1643,80 +1730,6 @@ void test_nybble_compress( const char * source_original, char * dest_original ){
         };
     *dest = '\0'; // null termination.
 }
-
-/*
-print compressed text (or other arbitrary byte string)
-for use in, for example, Arduino source code.
-*/
-void print_as_c_string( char * s, int length ){
-    printf( "char compressed_data = \"" );
-    bool avoid_hex_digit = false;
-    // Would it be better to use full 3-digit octal escapes
-    // rather than hex escapes
-    // so we don't have to handle the special case
-    // when the following character is also a hex digit?
-    int line_length = 99;
-    int i = 0;
-    for( ; i < length; i++ ){
-        if( 70 <= line_length ){
-            printf( "\"\n  \"" );
-            line_length = 3;
-            avoid_hex_digit = false;
-        };
-        char c = *s++;
-        if( '\"' == c ){
-            printf( "\\"  "\"" );
-            line_length += 2;
-            avoid_hex_digit = false;
-        }else if( '\\' == c ){
-            printf( "\\"  "\\" );
-            line_length += 2;
-            avoid_hex_digit = false;
-        }else if(avoid_hex_digit and isxdigit(c) ){
-            // Sometimes the C compiler will eat more than 2 hex digits
-            // after a "\x" hex escape code in a C string. See
-            // http://stackoverflow.com/questions/2735101/number-of-digits-in-a-hex-escape-code-in-c-c
-            putchar( '"' );
-            putchar( ' ' );
-            putchar( '"' );
-            putchar(c);
-            line_length += 4;
-            avoid_hex_digit = false;
-        }else if(isprint(c)){
-            /*
-            All isprint() characters can represent themselves in a C string,
-            except for the above 3 special cases.
-            */
-            putchar(c);
-            line_length++;
-            avoid_hex_digit = false;
-        }else if( '\n' == c ){
-            printf( "\\"  "n" );
-            line_length += 2;
-            avoid_hex_digit = false;
-        }else if( '\t' == c ){
-            printf( "\\"  "t" );
-            line_length += 2;
-            avoid_hex_digit = false;
-        }else{
-            /* This hexadecimal escape case can handle *every* byte,
-            including the NULL character.
-            even if we are currently avoiding hex digits.
-            The above special cases are just to make
-            the output printed source code more human-readable;
-            if we eliminated all those special cases
-            and always used the hexadecimal escape or octal escape
-            for every byte,
-            the resulting compiled executable file would be identical.
-            */
-            printf( "\\"  "x%x%x", ((c >> 4) & 0xf), (c & 0xf) );
-            line_length += 4;
-            avoid_hex_digit = true;
-        };
-    };
-    putchar('\"');
-    printf( " /* %i bytes. */\n", length );
-};
 
 int main( void ){
     char compressed_text[1000] = " Hello, world.";
@@ -1830,6 +1843,5 @@ int main( void ){
     return 0;
 }
 
-/* vim: set shiftwidth=4 expandtab ignorecase smartcase incsearch : */
 /* vim: set shiftwidth=4 expandtab ignorecase smartcase incsearch softtabstop=4 background=dark : */
 
