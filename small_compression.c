@@ -1,5 +1,5 @@
 /* small_compression.c
-WARNING: version 2015.00.00.01-alpha : extremely rough draft.
+WARNING: version 2015.00.00.03-alpha : extremely rough draft.
 2015-05-24: David Cary started.
 
 a data compression algorithm for small embedded systems.
@@ -35,7 +35,8 @@ enum algorithm {
 
 
 /*
-One table each for each of 32 different contexts;
+One table each for each of num_contexts different contexts;
+(default 32 contexts)
 each table containing a list of words in a compressed format.
 FUTURE:
 try more or fewer context bins ...
@@ -68,9 +69,6 @@ int byte_to_context( char byte ){
     // "clever" code that assumes num_contexts is a power of 2.
     return (byte bitand (num_contexts-1));
 }
-/*
-int next_word_index[num_contexts] = {0};
-*/
 
 #define word_indexes (256)
 /*
@@ -131,9 +129,6 @@ typedef struct Word_in_byte_dictionary_type {
 } Word_in_byte_dictionary_type;
 
 #define dictionary_indexes (0x7f)
-/*
-Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
-*/
 
 void initialize_dictionary(
     Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
@@ -1781,7 +1776,6 @@ int main( void ){
     };
 
 // FIXME: do exhaustive test of both bytestring and nybblestring compression.
-#if 0
 
     test_nybble_compress( text, compressed_text );
     /*
@@ -1793,7 +1787,6 @@ int main( void ){
     assert( 0 != compressed_text[ 2*(text_length-1) + 1 ] );
     assert( 0 == compressed_text[ 2*(text_length-1) + 2 ] );
     print_as_c_string( compressed_text, 2*text_length+1 );
-    printf("compressed: [%s]\n", compressed_text);
     /*
     decompress( compressed_text, decompressed_text );
     printf("decompressed: [%s]\n", decompressed_text);
@@ -1813,7 +1806,6 @@ int main( void ){
     */
     test_byte_compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
-    printf("compressed: [%s]\n", compressed_text);
     decompress( compressed_text, decompressed_text );
     printf("decompressed: [%s]\n", decompressed_text);
     if( memcmp( text, decompressed_text, text_length ) ){
@@ -1826,7 +1818,6 @@ int main( void ){
 
     compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
-    printf("compressed: [%s]\n", compressed_text);
     decompress( compressed_text, decompressed_text );
     printf("decompressed: [%s]\n", decompressed_text);
     if( memcmp( text, decompressed_text, text_length ) ){
@@ -1837,7 +1828,6 @@ int main( void ){
         printf("Successful test.\n");
     };
 
-#endif
 
 
     return 0;
