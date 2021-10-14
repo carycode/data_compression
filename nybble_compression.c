@@ -1,12 +1,142 @@
-/* small_compression.c
+/* nybble_compression.c
 WARNING: version 2015.00.00.03-alpha : extremely rough draft.
+2021-10-13: forked from small_compression.c
 2015-05-24: David Cary started.
 
 a data compression algorithm for small embedded systems.
 
-The compressed file is a series of bytes.
-Each byte represents a "word" (a series of nybbles).
-LZW-like algorithm, but with more context and better pruning.
+2021-09-15: DAV: I came up with this
+simple nybble-oriented data compression:
+
+* read a nybble at a time
+(first the hi nybble, then the lo nybble)
+* output a byte at a time
+* If the hi bit of the nybble is "0",
+then output the rest of this nybble
+and the following nybble literally
+as a byte (i.e.,
+bytes 0x00..0x7F,
+7-bit ASCII text,
+represents itself)
+* if the hi bit of the nybble is "1",
+then use the remaining 3 bits of this nybble
+to lookup one of 8 bytes to emit --
+ideally the 8 most-common bytes in this context.
+
+When we expect ASCII text,
+perhaps initialize those 8 bytes
+to the most-common letters --
+space, e, t, a, ... etc.
+
+Rather than literally counting
+the most-frequent bytes,
+perhaps simply
+move-to-front
+whatever actual byte
+occurs in this context.
+(If the actual byte
+is not already in that list of 8 bytes,
+drop the oldest byte from the list).
+
+With null context,
+this requires
+a single array of
+8 bytes
+to remember those most-frequent letters.
+
+With a full byte of context,
+this requires
+256 * 8 bytes
+to remember those most-frequent letters --
+perhaps too much to really be "simple".
+
+Perhaps something in-between
+would be appropriate
+for Arduino?
+Perhaps one of:
+(a)
+After emitting a byte,
+drop the hi bit
+(almost always 0 for ASCII text
+and so not very useful)
+and use the next-highest 4 bits
+as 4 bits of context.
+This requires
+2^4 * 8 = 16 * 8 = 128 bytes of context RAM.
+(b)
+A few categories,
+perhaps
+* whitespace
+* vowel
+* consonant
+* digit
+* symbol
+These 5 categories
+require
+5 * 8 = 40 bytes of context RAM.
+
+How to handle full 8-bit data?
+(some sort of escape?)
+Should we try to avoid
+creating a 0x00 byte in the compressed text?
+If not, how else are we going to mark end-of-text?
+
+Avoiding the 0x00 byte in compressed text
+when there are no 0x00 bytes in the plaintext
+seems pretty easy:
+3 cases:
+0x00 compressed byte when this byte represents a literal:
+cannot happen if the plaintext has no 0x00 bytes.
+0x00 byte when the hi nybble of this byte represents
+a compressed byte:
+cannot happen because we define
+all compressed bytes
+have a MSbit=1.
+0x00 byte when the hi nybble of this byte represent
+the second nybble of a literal byte:
+to avoid this problem,
+perhaps flip the meaning of the hi bit of the lo nybble
+in this case,
+so that
+the compressor has the option,
+after
+detecting that the hi nybble is 0x0,
+to force
+the hi bit of the low nybble to be "1"
+(avoiding the 0x00 byte)
+and having the next 7 bits represent
+any arbitrary full 7-bit literal.
+
+Trying to keep literals aligned to bytes:
+* every byte with '0' as the MSB is a literal
+* when decoding a byte with '1' as the MSB,
+the hi nybble is a compressed nybble.
+there are two cases:
+** Simple case: both nybbles of that byte are compressed nybbles.
+** awkward case: the lo nybble is the first half of a literal.
+The "easy" thing to do is to continue reading
+the next nybble ...
+but it's possible that we can have a long string of literals
+that is off by one nybble.
+
+To try to keep literal bytes
+aligned on byte boundaries,
+we can
+look ahead to the next byte B with MSB = '1'
+(temporarily skipping over literal bytes with MSB=0)
+and use up the least-significant nybble of that compressed byte
+with the lo nybble of the current byte
+to synthesize a single unaligned literal byte;
+*then* emit the literal bytes that we skipped over,
+*then* decompress the most-significant nybble of that byte B,
+then continue normally
+with the byte after B.
+This occasionally has 1 literal unaligned,
+but never a long string of unaligned literals.
+
+Worst-case expansion of 7-bit data is 1:1 (no expansion).
+
+
 
 The previous byte of context
 indicates which "dictionary" of known words to look up the next word in.
