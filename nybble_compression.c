@@ -27,6 +27,7 @@ When we expect ASCII text,
 perhaps initialize those 8 bytes
 to the most-common letters --
 space, e, t, a, ... etc.
+space, e, t, a,  o, i, n, s.
 
 Rather than literally counting
 the most-frequent bytes,
@@ -134,18 +135,75 @@ with the byte after B.
 This occasionally has 1 literal unaligned,
 but never a long string of unaligned literals.
 
+Is there a better way
+to keep literal bytes
+aligned on byte boundaries?
+
 Worst-case expansion of 7-bit data is 1:1 (no expansion).
 
 
 
 The previous byte of context
-indicates which "dictionary" of known words to look up the next word in.
-
-Trim all leaf nodes periodically.
-
-Initialize all dictionaries so, initially, every byte represents itself.
+indicates which list of common bytes (in this context) to look up the next byte in.
 
 Avoid using the 0x00 byte in the compressed text.
+
+FUTURE:
+compare compression effectiveness to
+* generalized 3-bit prediction
+* generalized 2-bit prediction
+* the 1-bit RFC1968 PPP Predictor Compression Protocol
+( https://en.wikibooks.org/wiki/Data_Compression/Markov_models#PPP_Predictor_Compression_Protocol )
+
+DAV's 2-bit prediction (8 or 9 bits per literal):
+(This assumes that the decompressed string *never* has any hi-bit-set bytes or 0x00 bytes).
+* If the bit-buffer is empty, and the next byte is a 0x00 byte, that's the end of this block. Done!
+* If the bit-buffer is empty, and the next byte starts with 0, emit that byte as a literal byte.
+(and insert that byte into the predictor table for this context).
+(and leave the bit-buffer empty).
+* If the bit-buffer is empty, and the next byte starts with 1, read that byte into the bit-buffer.
+(After we do this, the next bit we pull from the flag buffer is that '1' bit).
+* If the bit-buffer is not empty, pull the next bit from the bit-buffer and decide what to do next:
+** 0: literal: pull the next full byte from the compressed stream and emit it literally on the decompressed output stream.
+** 1: compressed: pull the next bit from the bit-buffer (if the bit-buffer is empty, pretend like we pulled a '0' bit).
+*** 0: emit most-common byte for this context; 1: emit second-most-common byte for this context.
+
+DAV's 2-bit prediction (8 or 10 bits per literal)
+(This allows all possible bytes in string, including hi-bit-set bytes and 0x00 bytes).
+* If the bit-buffer is empty, and the next byte is a 0x00 byte, that's the end of this block. Done!
+* If the bit-buffer is empty, and the next byte starts with 0, emit that byte as a literal byte
+(and insert that byte into the predictor table for this context).
+(and leave the bit-buffer empty).
+* If the bit-buffer is empty, and the next byte starts with 1, read that byte into the bit-buffer.
+(After we do this, the next bit we pull from the flag buffer is that '1' bit).
+* If the bit-buffer is not empty, pull the next 2 bits from the bit-buffer and decide what to do next:
+** 11: literal: pull the next full byte from the compressed stream and emit it literally on the decompressed output stream.
+(This is used to emit hi-bit-set bytes, and to emit 0x00 bytes, as well as bytes that are not common in this context).
+** 10: emit most-common byte for this context
+** 01: emit second-most-common byte for this context.
+** 00: emit third-most-common byte for this context.
+
+DAV's nybble prediction:
+similar to the 1-bit RFC1968 PPP Predictor Compression Protocol,
+except uses nybbles as symbols:
+* If the bit-buffer is empty, and the next byte is a 0x00 byte, that's the end of this block. Done!
+* If the bit-buffer is empty, and the next byte starts with 0, emit that byte as a literal byte
+(and insert those 2 nybbles into the predictor table for this context).
+(and leave the bit-buffer empty).
+* If the bit-buffer is empty, and the next byte starts with 1, read that byte into the bit-buffer.
+(After we do this, the next bit we pull from the bit-buffer is that '1' bit).
+(Or should we throw away that bit,
+so we have 7 bits in the bit-buffer,
+and the first one *might* be '0' ?).
+* If the bit-buffer is not empty, pull the next bit from the bit-buffer and decide what to do next:
+** 0: literal: pull the next full byte (or just nybble?) from the compressed stream and emit it literally on the decompressed output stream.
+(and insert those 2 nybbles into the predictor table for this context).
+(This is used to emit hi-bit-set bytes, and to emit 0x00 bytes, as well as bytes that are not common in this context).
+** 1: emit most-common nybble for this context
+
+
+
+
 
 */
 
@@ -156,18 +214,12 @@ Avoid using the 0x00 byte in the compressed text.
 #include <assert.h> // for assert()
 #include <ctype.h> // for isprint()
 
-enum algorithm {
-    LITERAL = ' ',
-    ISPRINT_IS_ALWAYS_LITERAL = 0x1f,
-    COMPRESSED_TEXT_IS_PRINTABLE = '_',
-    EIGHT_BIT_PRUNED = 8,
-};
-
-
 /*
 One table each for each of num_contexts different contexts;
-(default 32 contexts)
-each table containing a list of words in a compressed format.
+(default 16 contexts)
+each table containing a list of the most-common byte
+in this context.
+
 FUTURE:
 try more or fewer context bins ...
 if we have *lots* of data,
@@ -194,13 +246,12 @@ perhaps we allow this to be scalable to 2 or even only 1 context.
 */
 #define COMPILE_TIME_ASSERT(pred) switch(0){case 0:case pred:;}
 
-#define num_contexts (32)
+#define letters_per_context (8)
+#define num_contexts (16)
 int byte_to_context( char byte ){
     // "clever" code that assumes num_contexts is a power of 2.
-    return (byte bitand (num_contexts-1));
+    return ((byte>>3) bitand (num_contexts-1));
 }
-
-#define word_indexes (256)
 /*
 If I used
 const int num_contexts = 32;
@@ -213,77 +264,26 @@ so this code can compile without error on older C compilers.
 See
 http://c-faq.com/ansi/constasconst.html
 */
-/*
-word_indexes = 256 lets each word be represented by a byte.
-FUTURE: experiment with word_indexes = 0x1000
-so each word can be represented by 12 bits, like GIF-variant LZW.
-FUTURE: experiment with starting out with short 8-bit indexes
-and gradually expanding as necessary, like GIF-variant LZW.
-FUTURE:
-
-Consider storing the "words" in the dictionary more directly,
-for quicker copies ...
-so perhaps some buffer that uses about the same (less?) RAM
-that contains all the words in the dictionary,
-and this structure
-points to the first byte (nybble?)
-of that word in the buffer and its length.
-...
-Traditional LZW only makes words by adding letters to the end of the word,
-and the second-simplest form of pruning only deletes letters
-from the end of the word;
-perhaps such a buffer would make it easier to add a letter
-to the beginning of a word
-and prune by deleting letter from the beginning of a word.
-
-A few pruning strategies:
-* after we use up the last index in some context,
-clear and re-initialize *just that context*
-(all other contexts continue filling up right where they left off)
-* after we use up the last index in some context,
-prune *all* the leaf words in that context to open up at least one empty slot,
-then start filling up the empty slots again.
-* Dictionary always full:
-use some cache algorithm -- perhaps the clock algorithm --
-to empty up one leaf word as needed.
-
-*/
-typedef struct Word_in_byte_dictionary_type {
-    int prefix_word_index;
-    char last_letter;
-    bool leaf;
-    bool recently_used;
+typedef struct context_table {
+    char letter[num_contexts][letters_per_context];
     // only used for debug performance monitoring
     int times_used_directly;
-    int times_used_indirectly;
-} Word_in_byte_dictionary_type;
-
-#define dictionary_indexes (0x7f)
+} context_table_type;
 
 void initialize_dictionary(
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
-    int next_word_index[num_contexts]
+    context_table_type context_table;
 ){
     int context=0;
     for( context=0; context<num_contexts; context++ ){
-        int index=0;
-        for( index=0; index<dictionary_indexes; index++ ){
-            // pure byte-oriented -- big-endian or little-endian is irrelevant.
-            // apparently we never use these escape codes when
-            // the plain text is normal 7-bit ASCII text.
-            #define escape_code(x) ( 0x1f == ((x) bitor 0xf) )
-            dictionary[context][index].prefix_word_index = ' ';
-            char letter = index;
-            if( 0 == letter ){ letter = 'x'; }; // TODO: remove after debugging.
-            assert( letter < 0x80 );
-            assert( 0 < letter );
-            dictionary[context][index].last_letter = letter;
-            dictionary[context][index].leaf = true;
-            dictionary[context][index].recently_used = false;
-            dictionary[context][index].times_used_directly = 0;
-            dictionary[context][index].times_used_indirectly = 0;
-        };
-        next_word_index[ context ] = 0;
+        context_table.letter[context][0] = ' ';
+        context_table.letter[context][1] = 'e';
+        context_table.letter[context][2] = 't';
+        context_table.letter[context][3] = 'a';
+
+        context_table.letter[context][4] = 'o';
+        context_table.letter[context][5] = 'i';
+        context_table.letter[context][6] = 'n';
+        context_table.letter[context][7] = 's';
     };
 }
 
@@ -366,168 +366,56 @@ void print_as_c_string( const char * s, int length ){
     printf( " /* %i bytes. */\n", length );
 };
 
-// returns the number of bytes written to dest.
-int decompress_byte_index(
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
-    const int context, int index, char * dest
+int decompress_nybble(
+    context_table_type context_table;
+    const char context, const char nybble, char * dest
 ){
-    char reversed_word[128];
-    int i=0;
-    assert( 0x00 != index );
-
-    while( index bitand 0x80 ){
-        int prefix_index = dictionary[context][index - 0x80].prefix_word_index;
-        if( 0x80 <= prefix_index ){
-            assert( !dictionary[context][prefix_index-0x80].leaf );
-        };
-        char letter = dictionary[context][index - 0x80].last_letter;
-        assert( letter < 0x80 );
-        if( letter <= 0 ){
-            printf("context: 0x%x, index: 0x%x", context, index);
-            printf("letter: 0x%x\n", letter);
-        };
-        assert( 0 < letter );
-        reversed_word[i++] = letter;
-        index = prefix_index;
+    if( nybble bitand 0x08 ){
+        // hi bit of nybble set -- it's compressed.
+        output_byte = context_table[ context ][ nybble bitand 0x07 ];
+    }else{
+        // hi bit of nybble clear -- it's a literal
+        output_byte = (nybble bitand 0x07) << 4 + next_nybble;
     };
-    assert( !(index bitand 0x80) );
-    reversed_word[i++] = index;
-    // This if() supports hi-bit-set and 0x00 bytes in the plaintext.
-    // It may not be necessary if those bytes never occur in the plaintext.
-    if( 0x00 == index ){
-        printf( "test: special case: dictionary chain ends with 0x00.\n" );
-        i--;
-    };
-    const int bytes_written = i;
-    while( i ){
-        char letter = reversed_word[--i];
-        // FIXME: remove this assert when plaintext includes hi-bit-set bytes.
-        assert( letter < 0x80 );
-        assert( 0 < letter );
-        *dest = letter;
-        dest++;
-    };
-
-    return bytes_written;
+    *dest = output_byte;
 };
 
-void
-debug_print_dictionary_entry(
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
-    int context, int index
+int update_context(
+    context_table_type context_table;
+    const char context, const char output_byte
 ){
-        // picking only the lower 5 bits
-        // as the context means that
-        // we don't know exactly the full byte context ...
-        // so print the uppercase letters that
-        // map to this context.
-        // (probably the lowercase letters and space
-        // are more likely ...)
-        int context_letter = context + '@';
-            // int value = index | 0x80;
-                char dest[256]; // longer than the longest possible string.
-                Word_in_byte_dictionary_type word = dictionary[context][index-0x80];
-                int bytes = decompress_byte_index( dictionary, context, index, dest );
-                if( (2 == bytes) and
-                    ( (unsigned char)dest[0] == ' ' ) and
-                    ( (unsigned char)dest[1] == index - 0x80 )
-                ){
-                    // same as default
-                }else{
-                    printf( "index: 0x%x ", index );
-                    printf( "[0x%x = %c]", context, context_letter);
-                    putchar('[');
-                    print_as_c_literal( dest, bytes );
-                    putchar(']');
-                    if( word.recently_used ){ printf( "(recent)" ); };
-                    int prefix_index = word.prefix_word_index;
-                    assert( 0 < prefix_index );
-                    if( prefix_index < 0x80 ){
-                        assert( isprint( (char)prefix_index ) );
-                    }else{
-                        assert( !dictionary[context][prefix_index-0x80].leaf );
-                    };
-                    printf( "\n" );
-                }; 
-};
+    // find position output_byte in context table
+    // or position = letters_per_context
+    // if nowhere in table.
+    int position = letters_per_context;
+    for( int i=letters_per_context - 1; 0<= i; i-- ){
+        if( output_byte == context_table[context][position] ){
+            position = i;
+        };
+    };
+    while(( position < letters_per_context ) and ( output_byte != context_table[context][position] ) ){
+        position++
+    }
+    // put output_byte in position 0, moving all other letters
+    // between 0 and position.
+    for( int position = 0; entry < letters_per_context; entry++ ){
+        FIXME:
+    }
+}
+
 
 void
 debug_print_dictionary_contents(
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes]
+    context_table_type context_table;
 ){
     printf( "decompression dictionary: \n" );
     int context = 0;
     for( context=0; context<num_contexts; context++ ){
         int index = 0;
-        for( index=0x80; index<(0x80+dictionary_indexes); index++ ){
-            debug_print_dictionary_entry( dictionary, context, index );
+        for( index=0; index<letters_per_context; index++ ){
+            print( "%c", context_table.letter[context][index] );
         };
-    };
-}
-
-void
-increment_dictionary_index( int context, int next_word_index[num_contexts] ){
-    // FIXME: loop until we hit a leaf node.
-    int i = next_word_index[context] + 1;
-    if( dictionary_indexes <= i ){
-        i = 0;
-    };
-    next_word_index[context] = i;
-}
-/*
-Given the context and index of 2 consecutive indexes
-in the compressed text.
-*/
-void
-update_dictionary(
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
-    int context, int index, int next_context, int next_index, int tochange
-){
-    /*
-    int tochange = next_word_index[context];
-    */
-    unsigned char first_byte_of_next_word = 0xff;
-
-    bool special_case = (tochange == next_index) and (context = next_context);
-    if( !special_case ){
-        // normal case
-
-    // FIXME: we also do this in decompress_byte_index;
-    // it would be better to do this only once, either here or there.
-    while( next_index bitand 0x80 ){
-        assert( next_index >= 0x80 );
-        assert( next_index < 0xff );
-        int prefix_index = dictionary[next_context][next_index - 0x80].prefix_word_index;
-        next_index = prefix_index;
-    };
-    assert( !(next_index bitand 0x80) );
-    first_byte_of_next_word = next_index;
-
-    }else{
-        // handle the "special case" LZW exception,
-        // as mentioned by
-        // http://michael.dipperstein.com/lzw/#example3
-        // https://www.cs.duke.edu/csed/curious/compression/lzw.html#decompression
-        // https://en.wikipedia.org/wiki/Lempel%E2%80%93Ziv%E2%80%93Welch#Decoding_2
-        // http://www.perlmonks.org/?node_id=270016
-        // http://stackoverflow.com/questions/10450395/lzw-decompression-algorithm
-        // etc.
-        // DAV:
-        // are there any other special cases in this
-        // 
-        printf("(... handling LZW special case ...)\n");
-
-        assert(0); // unimplemented
-
-    };
-
-    assert( first_byte_of_next_word < 0x80 );
-
-    printf("context: %c, index: 0x%x, last_letter: %c.\n", (char)('@'+context), index, first_byte_of_next_word);
-    dictionary[context][tochange].prefix_word_index = index;
-    dictionary[context][tochange].last_letter = first_byte_of_next_word;
-    if( index >= 0x80 ){
-        dictionary[context][index - 0x80].leaf = false;
+        print( "\n" );
     };
 }
 
@@ -656,20 +544,6 @@ compress_byte_index(
     return bytes_eaten;
 };
 
-void
-initialize_compression_dictionary(
-    int compression_table[num_contexts][word_indexes][0x80]
-){
-    /* optional special case: spaces */
-    int context = 0;
-    for(; context<num_contexts; context++){
-        int lowercase_letter = 'a';
-        for(; lowercase_letter <= 'z'; lowercase_letter++){
-            compression_table[context][lowercase_letter][' '] = lowercase_letter+0x80;
-        };
-    };
-    /* end option */
-}
 
 void compress_bytestring( const char * source_original, char * dest_original){
     const char * source = source_original;
@@ -847,85 +721,6 @@ void test_compress_bytestring( const char * source_original, char * dest_origina
 
 
 
-typedef struct Word_in_nybble_table_type {
-    int prefix_word_index;
-    char last_letter;
-    int next_index; // only temporarily used inside decompress_index
-    bool leaf;
-    bool recently_used;
-    /*
-    // only used for debug performance monitoring
-    int times_used_directly;
-    int times_used_indirectly;
-    */
-} Word_in_nybble_table_type;
-/*
-FIXME:
-move next_index
-into a temporary array inside decompress_index?
-It only needs to be as long as the longest word ...
-so with a 128-entry table, max 128 indexes,
-and we only need it briefly ...
-and perhaps if we somehow guarantee that the longest wordlength
-is, say, 32 indexes, it really only needs to be 32 indexes long.
-*/
-
-Word_in_nybble_table_type table[num_contexts][word_indexes] = { };
-
-void initialize_table( int next_word_index[num_contexts] ){
-    /* Initialize so that normal ASCII text
-       (which occasionally uses carriage return 0x0D and line feed 0x0A)
-       can be (initially) represented by itself.
-    */
-    int context=0;
-    for( context=0; context<num_contexts; context++ ){
-        // initialize only the 256 bytes, even if
-        // we have 12-bit word indexes
-        int index=0;
-        for( index=0; index<word_indexes; index++ ){
-            // is it better to go big-endian or little-endian?
-            #define little_endian 1
-            #if little_endian
-            int first_nybble = (index) bitand 0x0f;
-            int second_nybble = (index >> 4) bitand 0x0f;
-            #else
-            int first_nybble = (index >> 4) bitand 0x0f;
-            int second_nybble = (index) bitand 0x0f;
-            #endif
-            #define nybble2index(x) ((x) bitor 0x10)
-            #define index2nybble(x) ((x) bitand (~0x10))
-            #define is_literal_index(x) ( 0x1f == ((x) bitor 0xf) )
-            assert( ((unsigned)first_nybble) < 0x10 );
-            table[context][index].prefix_word_index = nybble2index(first_nybble);
-            assert( ((unsigned)second_nybble) < 0x10 );
-            table[context][index].last_letter = second_nybble;
-            table[context][index].next_index = 0;
-            table[context][index].leaf = true;
-            if( is_literal_index( index ) ){
-                // the literal nybbles
-                // are never pruned, and in that sense
-                // are not ever considered to be a leaf.
-                table[context][index].leaf = false;
-            };
-            table[context][index].recently_used = true;
-        };
-        /* "Indexes" 0x10...0x1f should never be looked up in this table.
-           Those indexes represent the literal nybbles 0x0...0xf.
-           On low-RAM microprocesors, is there a good way
-           to avoid spending RAM bytes on these constants?
-        */
-        /*
-        start at high-word-set,
-        so we're guaranteed that ASCII text
-        where all bytes used in normal 7-bit ASCII text
-        represent themselves for
-        at least 128 words per context.
-        */
-        next_word_index[ context ] = 0x80;
-        
-    };
-
-}
 
 /*
 FIXME:
@@ -953,53 +748,6 @@ and use some other technique for indicating end-of-file.
 */
 
 /*
-
-* We periodically "prune" certain indexes -- typically bytes
-that are never or rarely used in the plaintext --
-and free them up to represent words.
-* Sometimes we need to emit a plaintext byte
-that isn't in the table.
-This happens when the plaintext contains one of the special compressed bytes
-(0x00 or 0x10..0x1f).
-This also happens after we "prune" a byte and start using it
-(in the compressed text) to represent a longer word.
-
-Currently we use this very simple approach
-that emits 2 bytes
-to represent such literal bytes:
-* emit one of the special bytes 0x10..0x1f
-to represent the high nybble of the literal byte.
-(The *low* nybble of these special bytes becomes the *high* nybble).
-When we hardwire the low-ASCII isprint()+DEL characters 0x20..0x7f
-to always represent themselves,
-this nybble indicates
-0x10: 0x00 and other control characters in the plaintext
-0x11: 0x10..0x1f control characters in the plaintext
-0x12..0x17: should never occur in the compressed text (?);
-perhaps we could re-use those bytes as a higher-level escape for other stuff?
-0x18..0x1f: high-bit-set characters in the plaintext.
-* emit a byte whose low nybble matches the low nybble of the literal byte,
-discarding and wasting its high 4 bits.
-(perhaps '0' + low_nybble? for relatively easy printable readability?)
-(perhaps 0x80 + low_nybble,
-so printable characters in the compressed text
-*always* represent themselves?
-0x81 already represents a variety of things
-depending on context,
-and immediately after these special bytes 0x10..0x1f,
-we can consider this a special context
-where 0x81 is always hard-wired to represent 0x01.
-)
-(perhaps 0x10 + low_nybble,
-so the bytes 0x10..0x1f always represent a nybble of an expanded literal byte;
-if the plaintext only contains normal 7-bit ASCII text,
-and we hardwired the low-ASCII isprint+DEL+CR+NL to represent themselves,
-then none of the bytes 0x00 or 0x10..0x1f should ever occur in the compressed text.
-and the high-bit-set bytes always represent words longer than 1 byte.
-)
-(perhaps simply literally store the plaintext byte as-is
-in the compressed text ... unless it is the 0x00 byte).
-
 The compressed format for each block is:
 * a single "compression type" byte
 * a series of nonzero indexes (initially bytes) decompressed as above
@@ -1027,10 +775,6 @@ and the overall checksum will confirm it is now good.
 Is there some way to get better compression
 without adding too much complexity
 and in ways that still fit in a small 8-bit microcontroller?
-Perhaps by somehow using those 4 bits wasted
-every time we need to output a plaintext byte
-that isn't already in the table?
-
 */
 
 /*
