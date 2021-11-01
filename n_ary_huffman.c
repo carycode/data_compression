@@ -77,9 +77,34 @@ linefeeds every 70 characters or so.
 
 #define COMPILE_TIME_ASSERT(pred) switch(0){case 0:case pred:;}
 
-int * histogram( const char * text, const int text_symbols ){
+// FIXME: support much larger numbers of symbols
+// than 256 'char'.
+void
+histogram(
+    const char * text,
+    const int text_symbols,
+    int h[text_symbols]
+){
+    /*
+    I wish
     int h[text_symbols] = {0};
-    return h;
+    zeroed out the array,
+    but instead the compiler tells me
+    "error: variable-sized object may not be initialized".
+    */
+    for(int i=0; i<text_symbols; i++){
+        h[text_symbols] = 0;
+    };
+    const unsigned char * c = (const unsigned char *) text;
+    /*
+    Currently assumes there is no '\0' chars
+    in the text block.
+    */
+    while( *c ){
+        h[*c]++;
+        c++;
+    };
+    // return h;
 }
 
 typedef struct {
@@ -127,20 +152,98 @@ the end that requires the least shuffling of other nodes.
 void partial_sort(){
 }
 
-int * huffman ( int * symbol_frequencies, int text_symbols, int compressed_symbols ){
+/*
+How to fairly compare trinary Huffman to binary Huffman?
+There are some cases where trinary Huffman
+should give *better* compression than binary,
+and vice versa.
+In particular,
+trinary should be best for files where letter frequencies
+are 1/3, 1/9, 1/27, 81, 243, or etc.
+(even after the overhead of converting trinary
+back to binary and storing in a binary computer file).
+Perhaps measure both ways:
+
+Store trinary into binary file:
+grab 5 trits at a time,
+convert into a number 1..243,
+and store as an 8-bit octet (which never uses byte 0 or 244..255).
+
+Store binary into trinary file:
+grab 3 bits at a time,
+convert into a number 0..7,
+and store as a 2-trit value 0..8.
+*/
+
+/*
+FIXME: often a block of text
+will happen to never use some particular
+letter or punctuation (say, the exclamation mark).
+Clearly we won't know this
+until *after* we count the symbol frequencies.
+Should *this* "huffman()" routine
+expect some of the symbol frequencies to be zero,
+or should we pre-filter them out
+somewhere else
+so this "huffman()" routine
+only sees the *actual* symbols in use
+and all the symbol_frequencies are positive?
+*/
+
+int * huffman (
+    const int * symbol_frequencies,
+    const int text_symbols,
+    const int compressed_symbols
+){
+    /*
+    I wish
     node list[text_symbols] = {0}; // list of both leaf and internal nodes
-    int sorted_indexes[2*text_symbols] = {0};
+    int sorted_index[2*text_symbols] = {0};
+    zeroed out the array,
+    but instead the compiler tells me
+    "error: variable-sized object may not be initialized".
+    */
+    node list[text_symbols];
+    int sorted_index[2*text_symbols];
     // initialize the leaf nodes
     // (typically including the 256 possible literal byte values)
-    for( i=0; i<text_symbols; i++){
+    for( int i=0; i<text_symbols; i++){
         list[i].leaf = true;
         list[i].leaf_value = i;
         list[i].count = symbol_frequencies[i];
-        sorted_indexes[i] = i;
+        sorted_index[i] = i;
+    };
+    for( int i=text_symbols; i<2*text_symbols; i++){
+        sorted_index[i] = 0;
     };
 
-    partial_sort( sorted_indexes, text_symbols, list );
+    // count out zero-frequency symbols
+    int nonzero_text_symbols = 0;
+    for( int i=0; i<text_symbols; i++ ){
+        if( 0 != list[ sorted_index[ i ] ].count ){
+            nonzero_text_symbols++ ;
+        };
+    };
+    // FIXME: squeeze out zero-frequency symbols?
 
+    int dummy_nodes = (nonzero_text_symbols - 1) % (compressed_symbols - 1);
+    
+    if( 2 == compressed_symbols ){
+        //binary
+        assert( 0 == dummy_nodes );
+    };
+    if( 3 == compressed_symbols ){
+        //trinary
+        const int expected_dummy = 1 - (nonzero_text_symbols & 1);
+        assert( expected_dummy == dummy_nodes );
+    };
+    assert( dummy_nodes < (compressed_symbols - 1) );
+
+    partial_sort( sorted_index, text_symbols, list );
+
+
+    int lengths[nonzero_text_symbols] = {};
+    // FIXME:
 
     return lengths;
 }
