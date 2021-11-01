@@ -17,7 +17,7 @@ CFLAGS += -Wall
 
 .PHONY: clean
 clean:
-	rm small_compression
-	rm n_ary_huffman
+	rm -f -- small_compression
+	rm -f -- n_ary_huffman
 
 
