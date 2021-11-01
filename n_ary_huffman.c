@@ -190,21 +190,10 @@ only sees the *actual* symbols in use
 and all the symbol_frequencies are positive?
 */
 
-int * huffman (
-    const int * symbol_frequencies,
-    const int text_symbols,
-    const int compressed_symbols
-){
-    /*
-    I wish
-    node list[text_symbols] = {0}; // list of both leaf and internal nodes
-    int sorted_index[2*text_symbols] = {0};
-    zeroed out the array,
-    but instead the compiler tells me
-    "error: variable-sized object may not be initialized".
-    */
-    node list[text_symbols];
-    int sorted_index[2*text_symbols];
+void
+setup_nodes( const int text_symbols, const int compressed_symbols , node list[text_symbols], const int * symbol_frequencies, int sorted_index[2*text_symbols] ){
+
+
     // initialize the leaf nodes
     // (typically including the 256 possible literal byte values)
     for( int i=0; i<text_symbols; i++){
@@ -217,6 +206,15 @@ int * huffman (
         sorted_index[i] = 0;
     };
 
+}
+
+void
+generate_huffman_tree(
+    const int text_symbols,
+    const int compressed_symbols,
+    node list[text_symbols],
+    int sorted_index[2*text_symbols]
+){
     // count out zero-frequency symbols
     int nonzero_text_symbols = 0;
     for( int i=0; i<text_symbols; i++ ){
@@ -242,8 +240,42 @@ int * huffman (
     partial_sort( sorted_index, text_symbols, list );
 
 
-    int lengths[nonzero_text_symbols] = {};
-    // FIXME:
+}
+
+void
+summarize_tree_with_lengths( const int text_symbols, node list[text_symbols], int lengths[text_symbols]){
+}
+
+int * huffman (
+    const int * symbol_frequencies,
+    const int text_symbols,
+    const int compressed_symbols
+){
+    /*
+    I wish
+    node list[text_symbols] = {0}; // list of both leaf and internal nodes
+    int sorted_index[2*text_symbols] = {0};
+    zeroed out the array,
+    but instead the compiler tells me
+    "error: variable-sized object may not be initialized".
+    */
+    node list[text_symbols];
+    int sorted_index[2*text_symbols];
+
+    setup_nodes( text_symbols, compressed_symbols, list, symbol_frequencies, sorted_index );
+
+    generate_huffman_tree(
+        text_symbols, compressed_symbols,
+        list,
+        sorted_index
+    );
+
+    int lengths[text_symbols];
+    for( int i=0; i<text_symbols; i++){
+        lengths[i] = 0;
+    };
+    // int lengths[nonzero_text_symbols] = {};
+    summarize_tree_with_lengths( text_symbols, list, lengths );
 
     return lengths;
 }
@@ -294,12 +326,14 @@ after the decoder is "turned on"
 etc.
 */
 
-int main(void){
+void
+next_block(void){
     char * original_text = load_text();
     size_t original_length = strlen( original_text );
     // FIXME: support arbitrary number of symbols.
-    int text_symbols = 258;
-    int symbol_frequencies * = histogram( text, text_symbols );
+    const int text_symbols = 258;
+    int symbol_frequencies[text_symbols];
+    histogram( text, text_symbols, symbol_frequencies );
     int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
     // FUTURE: length-limited Huffman?
     int * canonical_lengths = huffman( symbol_frequencies, text_symbols, compressed_symbols);
@@ -315,7 +349,10 @@ int main(void){
     }else{
         printf("Successful test.\n");
     }
-    
+}
+
+int main(void){
+    next_block();
     return 0;
 }
 
