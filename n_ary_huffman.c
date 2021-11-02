@@ -320,18 +320,67 @@ history-limited compression,
 after the decoder is "turned on"
 etc.
 */
+/*
+... avoids using malloc() ...
+*/
+
+size_t
+load_more_text(FILE * in, const size_t bufsize, char * buffer){
+    if( ferror(in) ){
+        // read error already occurred?
+        return -1;
+    };
+    size_t ret_code = fread( buffer, 1, bufsize, in);
+    if( bufsize == ret_code ){
+        // read all bufsize characters successfully;
+        // there's probably more characters later.
+        // Append a zero
+        // to convert this to a valid C string.
+        buffer[ret_code] = '\0';
+        return ret_code;
+    };
+
+    // else did *not* read a full bufsize characters.
+    if( feof(in) ){
+        // hit end of file.
+        // Append a zero
+        // to convert this to a valid C string.
+        buffer[ret_code] = '\0';
+        return ret_code;
+
+    }else if( ferror(in) ){
+        // some kind of read error.
+        return -1;
+    };
+    assert( 0 /* "This should never happen." */ );
+    return -1;
+}
+
+void
+debug_print_table( canonical_lengths, text_symbols, compressed_symbols ){
+    // FIXME:
+}
+void compress(){
+    // FIXME:
+}
+void decompress(){
+    // FIXME:
+}
 
 void
 next_block(void){
     // FIXME: use a larger buffer,
     // perhaps with malloc() or realloc() or both?
     const size_t bufsize = 65000;
-    char * original_text = load_more_text( stdin, bufsize, buffer );
+    char original_text[bufsize+1];
+    size_t used = load_more_text( stdin, bufsize, original_text );
     size_t original_length = strlen( original_text );
+    // FIXME: doesn't yet support reading '\0' bytes
+    assert( original_length == used );
     // FIXME: support arbitrary number of symbols.
     const int text_symbols = 258;
     int symbol_frequencies[text_symbols];
-    histogram( text, text_symbols, symbol_frequencies );
+    histogram( original_text, text_symbols, symbol_frequencies );
     int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
     // FUTURE: length-limited Huffman?
 
@@ -341,7 +390,7 @@ next_block(void){
     };
     // int canonical_lengths[nonzero_text_symbols] = {};
     huffman( symbol_frequencies, text_symbols, compressed_symbols, canonical_lengths );
-    debug_print_table( canonical_lengths , text_symbols, compressed_symbols );
+    debug_print_table( canonical_lengths, text_symbols, compressed_symbols );
     char * compressed_text = compress( canonical_lengths, text_symbols, compressed_symbols);
     char * decompressed_text = decompress( compressed_text );
     size_t decompressed_length = strlen( decompressed_text );
