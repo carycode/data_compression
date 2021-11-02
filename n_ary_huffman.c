@@ -357,7 +357,7 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
 }
 
 void
-debug_print_table( canonical_lengths, text_symbols, compressed_symbols ){
+debug_print_table( int text_symbols, int canonical_lengths[text_symbols], int compressed_symbols ){
     // FIXME:
 }
 void compress(){
@@ -391,8 +391,10 @@ next_block(void){
     // int canonical_lengths[nonzero_text_symbols] = {};
     huffman( symbol_frequencies, text_symbols, compressed_symbols, canonical_lengths );
     debug_print_table( canonical_lengths, text_symbols, compressed_symbols );
-    char * compressed_text = compress( canonical_lengths, text_symbols, compressed_symbols);
-    char * decompressed_text = decompress( compressed_text );
+    char compressed_text[bufsize+1];
+    compress( text_symbols, canonical_lengths, compressed_symbols, compressed_text );
+    char decompressed_text[bufsize+1];
+    decompress( compressed_text, decompressed_text );
     size_t decompressed_length = strlen( decompressed_text );
     assert( original_length == decompressed_length );
     if( memcmp( original_text, decompressed_text, original_length ) ){
