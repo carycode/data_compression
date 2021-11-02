@@ -246,10 +246,12 @@ void
 summarize_tree_with_lengths( const int text_symbols, node list[text_symbols], int lengths[text_symbols]){
 }
 
-int * huffman (
+void
+huffman (
     const int * symbol_frequencies,
     const int text_symbols,
-    const int compressed_symbols
+    const int compressed_symbols,
+    int lengths[text_symbols]
 ){
     /*
     I wish
@@ -270,14 +272,7 @@ int * huffman (
         sorted_index
     );
 
-    int lengths[text_symbols];
-    for( int i=0; i<text_symbols; i++){
-        lengths[i] = 0;
-    };
-    // int lengths[nonzero_text_symbols] = {};
     summarize_tree_with_lengths( text_symbols, list, lengths );
-
-    return lengths;
 }
 /*
 support streaming:
@@ -328,7 +323,10 @@ etc.
 
 void
 next_block(void){
-    char * original_text = load_text();
+    // FIXME: use a larger buffer,
+    // perhaps with malloc() or realloc() or both?
+    const size_t bufsize = 65000;
+    char * original_text = load_more_text( stdin, bufsize, buffer );
     size_t original_length = strlen( original_text );
     // FIXME: support arbitrary number of symbols.
     const int text_symbols = 258;
@@ -336,7 +334,13 @@ next_block(void){
     histogram( text, text_symbols, symbol_frequencies );
     int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
     // FUTURE: length-limited Huffman?
-    int * canonical_lengths = huffman( symbol_frequencies, text_symbols, compressed_symbols);
+
+    int canonical_lengths[text_symbols];
+    for( int i=0; i<text_symbols; i++){
+        canonical_lengths[i] = 0;
+    };
+    // int canonical_lengths[nonzero_text_symbols] = {};
+    huffman( symbol_frequencies, text_symbols, compressed_symbols, canonical_lengths );
     debug_print_table( canonical_lengths , text_symbols, compressed_symbols );
     char * compressed_text = compress( canonical_lengths, text_symbols, compressed_symbols);
     char * decompressed_text = decompress( compressed_text );
