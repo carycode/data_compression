@@ -191,9 +191,10 @@ and all the symbol_frequencies are positive?
 */
 
 void
-setup_nodes( const int text_symbols, const int compressed_symbols , node list[text_symbols], const int * symbol_frequencies, int sorted_index[2*text_symbols] ){
-
-
+setup_nodes(
+    const int text_symbols, node list[text_symbols],
+    const int * symbol_frequencies, int sorted_index[2*text_symbols]
+){
     // initialize the leaf nodes
     // (typically including the 256 possible literal byte values)
     for( int i=0; i<text_symbols; i++){
@@ -205,7 +206,6 @@ setup_nodes( const int text_symbols, const int compressed_symbols , node list[te
     for( int i=text_symbols; i<2*text_symbols; i++){
         sorted_index[i] = 0;
     };
-
 }
 
 void
@@ -244,6 +244,49 @@ generate_huffman_tree(
 
 void
 summarize_tree_with_lengths( const int text_symbols, node list[text_symbols], int lengths[text_symbols]){
+    int sum = 0;
+    for( int i=0; i<text_symbols; i++){
+        sum += list[i].count;
+        lengths[i] = sum; // FIXME:
+    };
+}
+
+void
+debug_print_table( int text_symbols, int canonical_lengths[text_symbols], int compressed_symbols ){
+    // FIXME:
+    printf( "compressed_symbols: %i \n", compressed_symbols );
+    for( int i=0; i<text_symbols; i++ ){
+        printf("symbol %i : length %i \n", i, canonical_lengths[i] );
+    }
+}
+
+void test_summarize_tree_with_lengths(void){
+    int text_symbols = 3;
+    node list_a[3] = {
+        { true, 9, 0, 0, 'a' },
+        { true, 9, 0, 0, 'b' },
+        { false, 4, 0, 1, 0 }
+    };
+    int lengths[2*text_symbols];
+    summarize_tree_with_lengths( text_symbols, list_a, lengths );
+    int compressed_symbols = 2;
+    debug_print_table( text_symbols, lengths, compressed_symbols );
+    assert( 1 == lengths['a'] );
+    assert( 1 == lengths['b'] );
+    node list_b[5] = {
+        { true, 9, 0, 0, 'a' },
+        { true, 9, 0, 0, 'b' },
+        { true, 8, 0, 0, 'c' },
+        { false, 17, 1, 2, 0 },
+        { false, 26, 0, 3, 0 }
+    };
+    summarize_tree_with_lengths( text_symbols, list_b, lengths );
+    assert( 1 == lengths['a'] );
+    assert( 2 == lengths['b'] );
+    assert( 2 == lengths['b'] );
+    for( int i=0; i<text_symbols; i++ ){
+        // something about shorter lengths having larger frequency counts
+    };
 }
 
 void
@@ -264,7 +307,7 @@ huffman (
     node list[text_symbols];
     int sorted_index[2*text_symbols];
 
-    setup_nodes( text_symbols, compressed_symbols, list, symbol_frequencies, sorted_index );
+    setup_nodes( text_symbols, list, symbol_frequencies, sorted_index );
 
     generate_huffman_tree(
         text_symbols, compressed_symbols,
@@ -356,10 +399,6 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
     return -1;
 }
 
-void
-debug_print_table( int text_symbols, int canonical_lengths[text_symbols], int compressed_symbols ){
-    // FIXME:
-}
 void compress(){
     // FIXME:
 }
@@ -390,7 +429,7 @@ next_block(void){
     };
     // int canonical_lengths[nonzero_text_symbols] = {};
     huffman( symbol_frequencies, text_symbols, compressed_symbols, canonical_lengths );
-    debug_print_table( canonical_lengths, text_symbols, compressed_symbols );
+    debug_print_table( text_symbols, canonical_lengths, compressed_symbols );
     char compressed_text[bufsize+1];
     compress( text_symbols, canonical_lengths, compressed_symbols, compressed_text );
     char decompressed_text[bufsize+1];
@@ -399,14 +438,19 @@ next_block(void){
     assert( original_length == decompressed_length );
     if( memcmp( original_text, decompressed_text, original_length ) ){
         printf("Error: decompressed text doesn't match original text.\n");
-        printf("[%s] original\n", text);
+        printf("[%s] original\n", original_text);
         printf("[%s] decompressed\n", decompressed_text);
     }else{
         printf("Successful test.\n");
     }
 }
 
+void run_tests(void){
+    test_summarize_tree_with_lengths();
+}
+
 int main(void){
+    run_tests();
     next_block();
     return 0;
 }
