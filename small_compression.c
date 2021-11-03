@@ -234,7 +234,7 @@ void print_as_c_string( const char * s, int length ){
     printf( "char compressed_data = \n" );
     print_as_c_literal( s, length );
     printf( " /* %i bytes. */\n", length );
-};
+}
 
 // returns the number of bytes written to dest.
 int decompress_byte_index(
@@ -279,7 +279,7 @@ int decompress_byte_index(
     };
 
     return bytes_written;
-};
+}
 
 void
 debug_print_dictionary_entry(
@@ -319,7 +319,7 @@ debug_print_dictionary_entry(
                     };
                     printf( "\n" );
                 }; 
-};
+}
 
 void
 debug_print_dictionary_contents(
@@ -419,7 +419,7 @@ void decompress_bytestring( const char * source, char * dest_original ){
     int compression_type = *source++;
     if( EIGHT_BIT_PRUNED == compression_type ){
         int next_word_index[num_contexts] = {0};
-        Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+        Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = {0};
         initialize_dictionary( dictionary, next_word_index );
         printf("dictionary after first initialization:\n");
         debug_print_dictionary_contents(dictionary);
@@ -524,7 +524,7 @@ compress_byte_index(
     };
     increment_dictionary_index( context, next_word_index );
     return bytes_eaten;
-};
+}
 
 void
 initialize_compression_dictionary(
@@ -546,7 +546,7 @@ void compress_bytestring( const char * source_original, char * dest_original){
     char * dest = dest_original;
     int compression_type = EIGHT_BIT_PRUNED;
 
-    int compression_table[num_contexts][word_indexes][0x80] = { };
+    int compression_table[num_contexts][word_indexes][0x80] = {0};
     /*
     FIXME: the 0x80 assumes that
     the plaintext contains only printable characters.
@@ -560,7 +560,7 @@ void compress_bytestring( const char * source_original, char * dest_original){
     initialize_compression_dictionary( compression_table );
 
     int next_word_index[num_contexts] = {0};
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = {0};
     initialize_dictionary(dictionary, next_word_index);
     printf("dictionary after first initialization:\n");
     debug_print_dictionary_contents(dictionary);
@@ -645,7 +645,7 @@ test_compress_byte_index(
     *dest = selected_index;
     increment_dictionary_index( context, next_word_index );
     return bytes_eaten;
-};
+}
 
 void test_compress_bytestring( const char * source_original, char * dest_original){
     const char * source = source_original;
@@ -655,7 +655,7 @@ void test_compress_bytestring( const char * source_original, char * dest_origina
     printf("quick test, using a hard-wired dictionary.\n");
 
     int next_word_index[num_contexts] = {0};
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
+    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = {0};
     initialize_dictionary( dictionary, next_word_index );
     printf("dictionary after first initialization:\n");
     /*
@@ -740,7 +740,7 @@ and perhaps if we somehow guarantee that the longest wordlength
 is, say, 32 indexes, it really only needs to be 32 indexes long.
 */
 
-Word_in_nybble_table_type table[num_contexts][word_indexes] = { };
+Word_in_nybble_table_type table[num_contexts][word_indexes] = {0};
 
 void initialize_table( int next_word_index[num_contexts] ){
     /* Initialize so that normal ASCII text
@@ -1224,7 +1224,7 @@ int decompress_index( int context, int index, char * dest, bool nybble_offset ){
     assert( ((unsigned)nybble) < 0x10 );
     write_nybble( nybble, dest, nybble_offset );
 #endif
-};
+}
 
 bool
 isprintable( const char * s ){
@@ -1235,7 +1235,7 @@ isprintable( const char * s ){
         s++;
     };
     return true;
-};
+}
 
 /*
 print all the data in the table,
@@ -1343,7 +1343,7 @@ increment_table_index( int context, int next_word_index[num_contexts]  ){
     */
 
     next_word_index[context] = next_index;
-};
+}
 
 /*
 Given the context and index of 2 consecutive indexes
@@ -1493,7 +1493,7 @@ void initialize_compression_table(
             };
         };
     };
-};
+}
 
 int get_nybble( const char * source, bool nybble_offset ){
     #if little_endian
@@ -1510,7 +1510,7 @@ int get_nybble( const char * source, bool nybble_offset ){
         int nybble = nybble2index( first_nybble );
         return nybble;
     };
-};
+}
 
 int
 compress_index(
@@ -1533,7 +1533,7 @@ compress_index(
     *dest = selected_index;
     increment_table_index( context, next_word_index );
     return nybbles_eaten;
-};
+}
 
 void
 debug_print_nybbles( const char * source, int nybbles ){
@@ -1552,7 +1552,7 @@ void compress( const char * source_original, char * dest_original ){
     char * dest = dest_original;
     int compression_type = EIGHT_BIT_PRUNED;
 
-    int compression_table[num_contexts][word_indexes][16] = { };
+    int compression_table[num_contexts][word_indexes][16] = {0};
 
     int next_word_index[num_contexts] = {0};
     initialize_table( next_word_index );
@@ -1622,7 +1622,7 @@ test_byte_compress_index(
     *dest = *source;
     increment_table_index( context, next_word_index );
     return 2;
-};
+}
 
 void
 test_byte_compress( const char * source_original, char * dest_original ){
@@ -1630,7 +1630,7 @@ test_byte_compress( const char * source_original, char * dest_original ){
     char * dest = dest_original;
     int compression_type = EIGHT_BIT_PRUNED;
 
-    int compression_table[num_contexts][word_indexes][16] = { };
+    int compression_table[num_contexts][word_indexes][16] = {0};
 
     int next_word_index[num_contexts] = {0};
     initialize_table( next_word_index );
@@ -1696,7 +1696,7 @@ test_nybble_compress_index(
     int nybble_offset = (unsigned) original_nybble_offset;
     *dest = get_nybble( source, nybble_offset );
     return 1;
-};
+}
 
 
 void test_nybble_compress( const char * source_original, char * dest_original ){
