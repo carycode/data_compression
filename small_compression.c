@@ -19,6 +19,12 @@ Avoid using the 0x00 byte in the compressed text.
 
 */
 
+/*
+FUTURE:
+consider using
+https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
+*/
+
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h> // for bool, true, false
@@ -129,6 +135,38 @@ typedef struct Word_in_byte_dictionary_type {
 } Word_in_byte_dictionary_type;
 
 #define dictionary_indexes (0x7f)
+
+/*
+FUTURE:
+perhaps something like
+"diagnostic push" and "diagnostic pop"
+explained on page
+https://gcc.gnu.org/onlinedocs/gcc/Diagnostic-Pragmas.html
+could be used with
+#pragma GCC diagnostic ignored "-Wtype-limits"
+to disable
+the following kind of "error" *only* inside assert() statements?
+
+When compiling with -Werror,
+How do I disable the
+"error: comparison is always true due to limited range of data type [-Werror=type-limits]"
+in code like
+            char letter = index;
+            assert( letter < 0x80 );
+            assert( 0 < letter );
+?
+(I want to leave that error,
+or at least a warning,
+turned on for this kind of warning *outside* asserts,
+but ideally I don't even want the warning
+*inside* asserts.
+
+I couldn't figure out how to disable this
+*only* inside assert() statements,
+so I'm reducing it from an error to a warning
+with this pragma:
+*/
+#pragma GCC diagnostic warning "-Wtype-limits"
 
 void initialize_dictionary(
     Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes],
