@@ -203,6 +203,14 @@ and the first one *might* be '0' ?).
 
 
 
+FUTURE:
+rather than using
+least-recently used (LRU)
+to update the table of 8
+"expected" characters,
+try
+Adaptive Replacement Cache (ARC).
+
 
 
 */
@@ -264,26 +272,26 @@ so this code can compile without error on older C compilers.
 See
 http://c-faq.com/ansi/constasconst.html
 */
-typedef struct context_table {
+typedef struct context_table_type {
     char letter[num_contexts][letters_per_context];
     // only used for debug performance monitoring
     int times_used_directly;
 } context_table_type;
 
 void initialize_dictionary(
-    context_table_type context_table;
+    context_table_type * context_table
 ){
     int context=0;
     for( context=0; context<num_contexts; context++ ){
-        context_table.letter[context][0] = ' ';
-        context_table.letter[context][1] = 'e';
-        context_table.letter[context][2] = 't';
-        context_table.letter[context][3] = 'a';
+        context_table->letter[context][0] = ' ';
+        context_table->letter[context][1] = 'e';
+        context_table->letter[context][2] = 't';
+        context_table->letter[context][3] = 'a';
 
-        context_table.letter[context][4] = 'o';
-        context_table.letter[context][5] = 'i';
-        context_table.letter[context][6] = 'n';
-        context_table.letter[context][7] = 's';
+        context_table->letter[context][4] = 'o';
+        context_table->letter[context][5] = 'i';
+        context_table->letter[context][6] = 'n';
+        context_table->letter[context][7] = 's';
     };
 }
 
@@ -364,12 +372,13 @@ void print_as_c_string( const char * s, int length ){
     printf( "char compressed_data = \n" );
     print_as_c_literal( s, length );
     printf( " /* %i bytes. */\n", length );
-};
+}
 
 int decompress_nybble(
-    context_table_type context_table;
+    context_table_type context_table,
     const char context, const char nybble, char * dest
 ){
+    char * output_byte;
     if( nybble bitand 0x08 ){
         // hi bit of nybble set -- it's compressed.
         output_byte = context_table[ context ][ nybble bitand 0x07 ];
@@ -378,13 +387,14 @@ int decompress_nybble(
         output_byte = (nybble bitand 0x07) << 4 + next_nybble;
     };
     *dest = output_byte;
-};
+    return output_byte;
+}
 
 int update_context(
     context_table_type context_table;
     const char context, const char output_byte
 ){
-    // find position output_byte in context table
+    // find position of output_byte in context table
     // or position = letters_per_context
     // if nowhere in table.
     int position = letters_per_context;
@@ -399,8 +409,11 @@ int update_context(
     // put output_byte in position 0, moving all other letters
     // between 0 and position.
     for( int position = 0; entry < letters_per_context; entry++ ){
-        FIXME:
     }
+    for( ; 1 <= position; ; position-- ){
+        context_table[context][position] = context_table[context][position-1];
+    };
+    context_table[context][0] = output_byte;
 }
 
 
