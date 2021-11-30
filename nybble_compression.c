@@ -771,55 +771,6 @@ write_nybble( int nybble, char * dest, bool nybble_offset ){
 }
 
 
-
-
-
-/*
-Given the context and index of 2 consecutive indexes
-in the compressed text.
-*/
-void
-update_table(int context, int index, int next_context, int next_index, int tochange){
-    /*
-    int tochange = next_word_index[context];
-    */
-
-    if( tochange != next_index ){
-        // normal case
-
-    // FIXME: we also do this in decompress_index;
-    // it would be better to do this only once, either here or there.
-    while( !is_literal_index( next_index ) ){
-        int prefix_index = table[next_context][next_index].prefix_word_index;
-        next_index = prefix_index;
-    };
-
-    }else{
-        // handle the "special case" LZW exception,
-        // as mentioned by
-        // http://michael.dipperstein.com/lzw/#example3
-        // https://www.cs.duke.edu/csed/curious/compression/lzw.html#decompression
-        // https://en.wikipedia.org/wiki/Lempel%E2%80%93Ziv%E2%80%93Welch#Decoding_2
-        // http://www.perlmonks.org/?node_id=270016
-        // http://stackoverflow.com/questions/10450395/lzw-decompression-algorithm
-        // etc.
-        // DAV:
-        // are there any other special cases in this
-        // 
-        printf("(... handling LZW special case ...)");
-
-
-    };
-    assert( is_literal_index( next_index ) );
-    char first_nybble_of_next_word = index2nybble(next_index);
-    assert( ( ((unsigned)first_nybble_of_next_word) < 0x10 ) );
-
-    table[context][tochange].prefix_word_index = index;
-    table[context][tochange].last_letter = first_nybble_of_next_word;
-    table[context][index].leaf = false;
-
-}
-
 void decompress( const char * source, char * dest_original ){
     char * dest = dest_original;
     size_t compressed_length = strlen( source );
@@ -839,15 +790,6 @@ void decompress( const char * source, char * dest_original ){
             // should context be the most recent complete aligned byte,
             // or the most recent (possibly unaligned) 2 nybbles?
             int context = byte_to_context( dest[-1] );
-            /* Add a word to the dictionary:
-               the previous word,
-               and the first nybble of the next word.
-               We assume that the compressor
-               *would* have used *that* word if it had been available,
-               so clearly that word is *not* already in the dictionary.
-               Add entry just before decompressing it,
-               to handle the LZW special case.
-            */
             int tochange = next_word_index[context];
             update_table(previous_context, previous_index, context, index, tochange);
             increment_table_index( context, next_word_index );
@@ -874,55 +816,6 @@ void decompress( const char * source, char * dest_original ){
 }
 
 
-/*
-compression table:
-for every possible current_index,
-(i.e., some prefix string)
-a list:
-For each of 16 possible next-nybbles,
-if that longer string exists in the dictionary,
-the table indicates what index 
-(i.e., some slightly longer string)
-represents that longer string.
-Currently we're reserving 0x00
-to indicate "that longer string does not yet exist in the dictionary".
-FUTURE:
-Consider using a completely out-of-band indicator
-or some other reserved index, perhaps a "literal" index.
-The compression_table[]
-needs to be synchronized to the decompression table[].
-*/
-void initialize_compression_table(
-    int compression_table[num_contexts][word_indexes][16]
-){
-    int context=0;
-    for( context=0; context<num_contexts; context++ ){
-        // initialize all the indexes,
-        // even if we have more than 256 of them.
-        int index=0;
-        for( index=0; index<word_indexes; index++ ){
-/* FIXME:
-#if only_high_bit_set_is_word
-            int value = index | 0x80;
-#else
-*/
-            // is it better to go big-endian or little-endian?
-            #if little_endian
-            int second_nybble = (index >> 4) bitand 0x0f;
-            #else
-            int second_nybble = (index) bitand 0x0f;
-            #endif
-            int nybble = 0;
-            for( nybble = 0; nybble<16; nybble++ ){
-                if( is_literal_index( index ) ){
-                    compression_table[context][index][nybble] = nybble2index(second_nybble);
-                }else{
-                    compression_table[context][index][nybble] = 0;
-                };
-            };
-        };
-    };
-};
 
 int get_nybble( const char * source, bool nybble_offset ){
     #if little_endian
