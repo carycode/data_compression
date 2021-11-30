@@ -139,6 +139,52 @@ Is there a better way
 to keep literal bytes
 aligned on byte boundaries?
 
+Perhaps something more like:
+* every literal is a byte that represents itself
+* long strings of literals
+end with a byte B with MSB = '1'.
+* The "nice" case is when
+that byte is completely used up
+decoding 2 (or more?) compressed bytes.
+In more generality,
+when we have an even number of compressed bytes
+between uncompressed literal bytes.
+* The awkward case is when
+we have an odd number of compressed bytes
+between literal bytes.
+That seems like it would be easy to fix:
+we have two modes:
+exactly 1 leftover nybble,
+or zero leftover nybbles.
+When we have zero leftover nybbles,
+when we hit a byte with MSbit=1,
+we decompress the hi nybble.
+If the lo nybble also has MSbit=1,
+we decompress it and we end up with zero leftover nybbles,
+as before.
+If the lo nybble has MSBit=0,
+then we store that nybble in a buffer for later use.
+This seems to result
+in an unbounded number of buffered nybbles
+when we alternate
+literal - nybble - literal - nybble - literal ...
+Any other case of an odd number of non-literals
+between literals is easy to fix:
+if we have zero leftover nybbles,
+store a nybble in a buffer for later use.
+If we have 1 leftover nybbles,
+use it up in this string of compressed nybbles
+(literal - byte - literal
+can decompress the byte + leftover nybble into 3 characters).
+i.e., if we need to emit 3 non-literals between literals,
+if we have zero leftover nybbles
+compress those 3 into 2 bytes
+(with a leftover nybble);
+if we have a leftover nybble,
+compress those 3 into 1 byte
+(and put the third into the leftover nybble).
+
+
 Worst-case expansion of 7-bit data is 1:1 (no expansion).
 
 
@@ -398,28 +444,25 @@ int decompress_nybble(
 
 int update_context(
     context_table_type context_table,
-    const char context, const char output_byte
+    const char context_byte, const char output_byte
 ){
-    // find position of output_byte in context table
-    // or position = letters_per_context
-    // if nowhere in table.
-    int position = letters_per_context;
-    for( int i=letters_per_context - 1; 0<= i; i-- ){
-        if( output_byte == context_table.letter[context][position] ){
-            position = i;
-        };
-    };
-    while(( position < letters_per_context ) and ( output_byte != context_table.letter[context][position] ) ){
-        position++;
-    };
     // put output_byte in position 0, moving all other letters
-    // between 0 and position.
-    for( int position = 0; entry < letters_per_context; entry++ ){
-    };
-    for( ; 1 <= position; ; position-- ){
-        context_table.letter[context][position] = context_table.letter[context][position-1];
-    };
-    context_table.letter[context][0] = output_byte;
+    // but first grab old value that was in position 0
+    int context = (int)(unsigned char)context_byte;
+    char new_letter = output_byte;
+    int position = 0;
+    do{
+        char old_letter = context_table.letter[context][position];
+        context_table.letter[context][position] = new_letter;
+        new_letter = old_letter;
+        position++;
+    }while(
+        ( position < letters_per_context ) and
+        (new_letter != output_byte)
+    );
+
+    assert( output_byte == context_table.letter[context][0] );
+    return 0;
 }
 
 
@@ -432,9 +475,9 @@ debug_print_dictionary_contents(
     for( context=0; context<num_contexts; context++ ){
         int index = 0;
         for( index=0; index<letters_per_context; index++ ){
-            print( "%c", context_table.letter[context][index] );
+            printf( "%c", context_table.letter[context][index] );
         };
-        print( "\n" );
+        printf( "\n" );
     };
 }
 
@@ -449,6 +492,7 @@ Something like
    '\x80': ' w'
 
 */
+#define NYBBLES 0xAF /* arbitrarily chosen */
 void decompress_bytestring( const char * source, char * dest_original ){
     char * dest = dest_original;
     size_t compressed_length = strlen( source );
@@ -456,48 +500,57 @@ void decompress_bytestring( const char * source, char * dest_original ){
     int compression_type = *source++;
     if( NYBBLES == compression_type ){
         context_table_type context_table;
-        int next_word_index[num_contexts] = {0};
-        Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
-        initialize_dictionary( dictionary, next_word_index );
+        initialize_dictionary( &context_table );
         printf("dictionary after first initialization:\n");
-        debug_print_dictionary_contents(dictionary);
+        debug_print_dictionary_contents(context_table);
         // first byte copied unchanged, in order to provide context
-        int previous_index = (unsigned char)source[0];
         printf( "'%c': (%c)", source[0], source[0] );
         *dest++ = *source++;
-        int previous_context = ' ';
+        int nybble_offset = 0;
         while( *source ){
             int index = (unsigned char)*source++;
             // context is the most recent byte
             int context = byte_to_context( (unsigned char)dest[-1] );
-            /* Add a word to the dictionary:
-               the previous word,
-               and the first byte of the next word.
-               We assume that the compressor
-               *would* have used *that* word if it had been available,
-               so clearly that word is *not* already in the dictionary.
-            */
-            int tochange = next_word_index[context];
-            update_dictionary(dictionary, previous_context, previous_index, context, index, tochange);
-            increment_dictionary_index( context, next_word_index );
-            int bytes = decompress_byte_index( dictionary, context, index, dest );
+            // FUTURE:
+            // rather than splitting up literals pre-emtively here
+            // and then later noticing it's a literal
+            // and re-assembling it in decompress_nybble,
+            // perhaps better to leave source byte
+            // as a single unit
+            // until we know it's not a literal
+            // and needs to be split up.
+            int nybble;
+            int next_nybble;
+            if( 0 == nybble_offset ){
+                nybble = (index >> 4) bitand 0xF;
+                next_nybble = index bitand 0xF;
+            }else{
+                nybble = index bitand 0xF;
+                next_nybble = (source[1] >> 4) bitand 0xF;
+            };
+            int nybbles_used = decompress_nybble(
+                context_table, context, nybble, next_nybble, dest
+            );
             print_as_c_literal( source, 1 );
             printf(": ");
-            print_as_c_literal(dest, bytes);
+            print_as_c_literal(dest, 1);
             putchar('\n');
-            assert( 1 <= bytes );
-            
-            dest += bytes;
-            previous_context = context;
-            previous_index = index;
+            assert( 1 <= nybbles_used );
+            nybble_offset += nybbles_used;
+            if( nybble_offset >= 2 ){
+                source++;
+                nybble_offset -= 2;
+            };
+            assert( nybble_offset < 2 );
+            dest++;
         };
-        debug_print_dictionary_contents(dictionary);
-    }else if( LITERAL == compression_type ){
+        printf("final dictionary:\n");
+        debug_print_dictionary_contents(context_table);
+    }else{
+        // uncompressed literals
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
         };
-    }else{
-        printf("invalid compressed data");
     };
     *dest = '\0'; // null termination.
     size_t decompressed_length = strlen( dest_original ); // assume null-terminated -- wise?
@@ -506,16 +559,23 @@ void decompress_bytestring( const char * source, char * dest_original ){
 
 int
 compress_byte_index(
-    int compression_table[num_contexts][word_indexes][0x80],
-    int next_word_index[num_contexts],
+    context_table_type * context_table,
     int context, const char * source, char * dest
 ){
-    // FIXME: perhaps print a debug message in the "LZW special case".
-    int byte_offset = 0;
-    // normal compression
-    int bytes_eaten = 0;
-    int selected_index = 0;
-    int next_index = source[0];
+    char s = source[0];
+    // If this character
+    // is in the context table, compress it.
+    // Otherwise emit it as a literal.
+    int i = 0;
+    do{
+        char c = context_table->letter[context][i];
+        i++;
+    }while(
+        (i < letters_per_context) and
+        (c != s);
+    );
+
+
     assert( next_index < 0x80 );
     // FIXME: implement
     selected_index = next_index;
@@ -526,32 +586,7 @@ compress_byte_index(
         bytes_eaten = 2;
     };
     unsigned char byte = source[byte_offset];
-    /*
-    bytes_eaten = 0;
-    unsigned char byte = 0xff;
-
-    // search through the tree
-    do{
-        byte = source[byte_offset];
-        / *
-        FIXME:
-        remove this assert when compressing hi-bit-set bytes.
-        * /
-        assert( byte < 0x80 );
-        selected_index = next_index;
-        next_index = compression_table[context][selected_index][byte];
-        assert( (0 == next_index) or (0x80 bitand next_index) );
-        byte_offset++;
-        bytes_eaten++;
-    }while( next_index );
-    // add a new leaf to the tree
-    assert( 0 == next_index );
-    */
     assert( byte < 0x80 );
-    /*
-    assert( 0 == compression_table[context][selected_index][byte] );
-    */
-    compression_table[context][selected_index][byte] = next_word_index[context] + 0x80;
 
     assert( 0 != selected_index );
     *dest = selected_index;
@@ -562,43 +597,28 @@ compress_byte_index(
     };
     increment_dictionary_index( context, next_word_index );
     return bytes_eaten;
-};
+}
 
 
 void compress_bytestring( const char * source_original, char * dest_original){
     const char * source = source_original;
     char * dest = dest_original;
-    int compression_type = EIGHT_BIT_PRUNED;
+    int compression_type = NYBBLES;
 
-    int compression_table[num_contexts][word_indexes][0x80] = { };
-    /*
-    FIXME: the 0x80 assumes that
-    the plaintext contains only printable characters.
-    Extend to allow all possible bytes in the uncompressed text,
-    by either
-    (a) bumping from 0x80 to 0x100, or
-    (b) reducing from (0x80) to (0x10 * 2), with a two-level nybble lookup
-    (c) some other reduced-memory variant
-    */
-
-    initialize_compression_dictionary( compression_table );
-
-    int next_word_index[num_contexts] = {0};
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
-    initialize_dictionary(dictionary, next_word_index);
+    context_table_type context_table;
+    initialize_dictionary( context_table );
     printf("dictionary after first initialization:\n");
-    debug_print_dictionary_contents(dictionary);
+    debug_print_dictionary_contents(context_table);
     printf("compressing ...\n");
 
     *dest++ = compression_type;
-    source = source_original;
     // first byte copied unchanged, in order to provide context
     *dest++ = *source++;
     // int previous_context = 0;
     while( *source ){ // assume null-terminated string -- is this wise?
         int context = byte_to_context( source[-1] );
         int bytes = compress_byte_index(
-            compression_table,
+            &compression_table,
             next_word_index,
             context, source, dest
             );
@@ -613,7 +633,6 @@ void compress_bytestring( const char * source_original, char * dest_original){
         increment_dictionary_index( context );
         */
         // each compressed index uses 1 byte
-        assert( 256 >= word_indexes );
         dest++;
 
         print_as_c_literal( source, bytes );
@@ -628,7 +647,7 @@ void compress_bytestring( const char * source_original, char * dest_original){
     };
     *dest = '\0'; // null termination.
     printf("table after some compression:\n");
-    debug_print_dictionary_contents(dictionary);
+    debug_print_dictionary_contents(context_table);
 
     size_t source_length = strlen( source_original );
     printf( "source_length: %zi.\n", source_length );
@@ -642,7 +661,14 @@ void compress_bytestring( const char * source_original, char * dest_original){
         printf("incompressible section; copying as literals.");
         source = source_original;
         dest = dest_original;
-        *dest++ = compression_type;
+        // Alas, currently only supports
+        // 7-bit data, without high-bit-set.
+        // FUTURE:
+        // consider something like
+        // *dest++ = compression_type;
+        // to support 8-bit data.
+        assert( source[0] < 128 );
+        
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
         };
