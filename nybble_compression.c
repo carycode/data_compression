@@ -443,7 +443,7 @@ int decompress_nybble(
 }
 
 int update_context(
-    context_table_type context_table,
+    context_table_type * context_table,
     const char context_byte, const char output_byte
 ){
     // put output_byte in position 0, moving all other letters
@@ -452,8 +452,8 @@ int update_context(
     char new_letter = output_byte;
     int position = 0;
     do{
-        char old_letter = context_table.letter[context][position];
-        context_table.letter[context][position] = new_letter;
+        char old_letter = context_table->letter[context][position];
+        context_table->letter[context][position] = new_letter;
         new_letter = old_letter;
         position++;
     }while(
@@ -461,11 +461,15 @@ int update_context(
         (new_letter != output_byte)
     );
 
-    assert( output_byte == context_table.letter[context][0] );
+    assert( output_byte == context_table->letter[context][0] );
     return 0;
 }
 
 
+/*
+print all the data in the table,
+in a relatively human-readable format.
+*/
 void
 debug_print_dictionary_contents(
     context_table_type context_table
@@ -474,6 +478,13 @@ debug_print_dictionary_contents(
     int context = 0;
     for( context=0; context<num_contexts; context++ ){
         int index = 0;
+        // picking only some bits
+        // as the context means that
+        // we don't know exactly the full byte context ...
+        // so print one letter that
+        // maps to this context.
+        // (probably the lowercase letters and space
+        // are more likely ...)
         for( index=0; index<letters_per_context; index++ ){
             printf( "%c", context_table.letter[context][index] );
         };
@@ -492,7 +503,8 @@ Something like
    '\x80': ' w'
 
 */
-#define NYBBLES 0xAF /* arbitrarily chosen */
+#define NYBBLES (0xAF) /* arbitrarily chosen */
+#define LITERAL (' ')  /* arbitrarily chosen */
 void decompress_bytestring( const char * source, char * dest_original ){
     char * dest = dest_original;
     size_t compressed_length = strlen( source );
@@ -560,6 +572,7 @@ void decompress_bytestring( const char * source, char * dest_original ){
 int
 compress_byte_index(
     context_table_type * context_table,
+    int nybble_offset,
     int context, const char * source, char * dest
 ){
     char s = source[0];
@@ -567,36 +580,40 @@ compress_byte_index(
     // is in the context table, compress it.
     // Otherwise emit it as a literal.
     int i = 0;
+    char c = 0;
     do{
-        char c = context_table->letter[context][i];
+        c = context_table->letter[context][i];
         i++;
     }while(
         (i < letters_per_context) and
-        (c != s);
+        (c != s)
     );
 
-
-    assert( next_index < 0x80 );
-    // FIXME: implement
-    selected_index = next_index;
-    bytes_eaten = 1;
-    // quick test, using a hard-wired dictionary
-    if( (' ' == source[0]) and islower(source[1]) ){
-        selected_index = 0x80 + source[1];
-        bytes_eaten = 2;
+    if( c != s ){
+        // not in context table.
+        // emit as literal.
+        *dest = s;
+        update_context(
+            context_table,
+            source[-1],
+            s
+        );
+        return 2;
     };
-    unsigned char byte = source[byte_offset];
-    assert( byte < 0x80 );
 
-    assert( 0 != selected_index );
-    *dest = selected_index;
-    if( dest[0] bitand 0x80 ){
-        assert( 1 < bytes_eaten );
+
+    int nybble = (i-1) bitor 0x8;
+    if(0 == nybble_offset){
+        *dest = nybble << 4;
     }else{
-        assert( 1 == bytes_eaten );
+        *dest |= nybble;
     };
-    increment_dictionary_index( context, next_word_index );
-    return bytes_eaten;
+    update_context(
+            context_table,
+            source[-1],
+            s
+    );
+    return 1;
 }
 
 
@@ -606,7 +623,7 @@ void compress_bytestring( const char * source_original, char * dest_original){
     int compression_type = NYBBLES;
 
     context_table_type context_table;
-    initialize_dictionary( context_table );
+    initialize_dictionary( &context_table );
     printf("dictionary after first initialization:\n");
     debug_print_dictionary_contents(context_table);
     printf("compressing ...\n");
@@ -615,11 +632,12 @@ void compress_bytestring( const char * source_original, char * dest_original){
     // first byte copied unchanged, in order to provide context
     *dest++ = *source++;
     // int previous_context = 0;
+    int nybble_offset = 0;
     while( *source ){ // assume null-terminated string -- is this wise?
         int context = byte_to_context( source[-1] );
         int bytes = compress_byte_index(
-            &compression_table,
-            next_word_index,
+            &context_table,
+            nybble_offset,
             context, source, dest
             );
 
@@ -669,95 +687,6 @@ void compress_bytestring( const char * source_original, char * dest_original){
         // to support 8-bit data.
         assert( source[0] < 128 );
         
-        while( *source ){ // assume null-terminated string -- is this wise?
-            *dest++ = *source++;
-        };
-        *dest = '\0'; // null termination.
-    };
-}
-
-
-int
-test_compress_byte_index(
-    int next_word_index[num_contexts],
-    int context, const char * source, char * dest
-){
-    int bytes_eaten = 0;
-    int selected_index = 0;
-    int next_index = source[0];
-    selected_index = next_index;
-    bytes_eaten = 1;
-    // quick test, using a hard-wired dictionary
-    if( (' ' == source[0]) and islower(source[1]) ){
-        selected_index = 0x80 + source[1];
-        bytes_eaten = 2;
-    };
-    *dest = selected_index;
-    increment_dictionary_index( context, next_word_index );
-    return bytes_eaten;
-};
-
-void test_compress_bytestring( const char * source_original, char * dest_original){
-    const char * source = source_original;
-    char * dest = dest_original;
-    int compression_type = EIGHT_BIT_PRUNED;
-
-    printf("quick test, using a hard-wired dictionary.\n");
-
-    int next_word_index[num_contexts] = {0};
-    Word_in_byte_dictionary_type dictionary[num_contexts][dictionary_indexes] = { };
-    initialize_dictionary( dictionary, next_word_index );
-    printf("dictionary after first initialization:\n");
-    /*
-    debug_print_dictionary_contents();
-    */
-    printf("compressing ...\n");
-
-    *dest++ = compression_type;
-    source = source_original;
-    // first byte copied unchanged, in order to provide context
-    *dest++ = *source++;
-    // int previous_context = 0;
-    while( *source ){ // assume null-terminated string -- is this wise?
-        int context = byte_to_context( dest[-1] );
-        int bytes = test_compress_byte_index(
-            next_word_index,
-            context, source, dest
-            );
-
-        // each compressed index uses 1 byte
-        assert( 256 >= word_indexes );
-        dest++;
-
-        print_as_c_literal( source, bytes );
-        assert( 1 <= bytes );
-        if( dest[-1] bitand 0x80 ){
-            assert( 1 < bytes );
-        }else{
-            assert( 1 == bytes );
-        };
-        source += bytes;
-        // previous_context = context;
-    };
-    *dest = '\0'; // null termination.
-    /*
-    printf("table after some compression:\n");
-    debug_print_dictionary_contents();
-    */
-
-    size_t source_length = strlen( source_original );
-    printf( "source_length: %zi.\n", source_length );
-    size_t compressed_length = strlen( dest_original ); // assume null-terminated -- wise?
-
-    if( compressed_length >= source_length ){
-        compression_type = LITERAL;
-    };
-
-    if( LITERAL == compression_type ){
-        printf("incompressible section; copying as literals.");
-        source = source_original;
-        dest = dest_original;
-        *dest++ = compression_type;
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
         };
@@ -841,174 +770,9 @@ write_nybble( int nybble, char * dest, bool nybble_offset ){
     };
 }
 
-/*
-returns the number of nybbles written to dest.
-*/
-int decompress_index( int context, int index, char * dest, bool nybble_offset ){
-#undef arbitrary
-#define arbitrary 1
-#if arbitrary
-    // special case for literals
-    if( is_literal_index( index ) ){
-        int nybble = index2nybble( index );
-        assert( ((unsigned)nybble) < 0x10 );
-        write_nybble( nybble, dest, nybble_offset );
-        int nybble_count = 1;
-        return nybble_count;
-    }else{
-        // this index represents a "word",
-        // a string of nybbles in the dictionary.
-        int previous_index = table[context][index].prefix_word_index;
-        int nybble_count = decompress_index( context, previous_index, dest, nybble_offset );
-        dest += (nybble_count >> 1);
-        nybble_offset ^= (nybble_count bitand 1);
-        int nybble = table[context][index].last_letter;
-        assert( ((unsigned)nybble) < 0x10 );
-        write_nybble( nybble, dest, nybble_offset );
-        return 1+nybble_count;
-    };
-#else
-    assert( 0 == table[context][index].next_index );
-    while( !is_literal_index( index ) ){
-        int prefix_index = table[context][index].prefix_word_index;
-        table[context][prefix_index].next_index = index;
-        index = prefix_index;
-    };
-    assert( is_literal_index( index ) );
-    while( table[index].next_index ){
-        int nybble = table[context][index].last_letter;
-        assert( ((unsigned)nybble) < 0x10 );
-        write_nybble( nybble, dest, nybble_offset );
-        int next_index = table[context][index].next_index;
-        table[context][index].next_index = 0;
-        index = next_index;
-        if(nybble_offset){ dest++ };
-        nybble_offset ^= 1;
-    };
-    int nybble = table[context][index].last_letter;
-    assert( ((unsigned)nybble) < 0x10 );
-    write_nybble( nybble, dest, nybble_offset );
-#endif
-};
 
-bool
-isprintable( const char * s ){
-    while(*s){
-        if( !isprint( *s ) ){
-            return false;
-        };
-        s++;
-    };
-    return true;
-};
 
-/*
-print all the data in the table,
-in a relatively human-readable format.
-*/
-void
-debug_print_table_contents(){
-    printf( "decompression dictionary: " );
-    int context = 0;
-    for( context=0; context<num_contexts; context++ ){
-        int index = 0;
-        for( index=0; index<word_indexes; index++ ){
-#if only_high_bit_set_is_word
-            int value = index | 0x80;
-#else
-            int value = index;
-#endif
-            if( is_literal_index(index) ){
-                    /*
-                    printf( "index: 0x%x ", index );
-                    printf( "(literal)" );
-                    */
-            }else{
-                // picking only the lower 5 bits
-                // as the context means that
-                // we don't know exactly the full byte context ...
-                // so print the uppercase letters that
-                // map to this context.
-                // (probably the lowercase letters and space
-                // are more likely ...)
-                int context_letter = context + '@';
-                char dest[256]; // longer than the longest possible string.
-                int nybbles = decompress_index( context, index, dest, 0 );
-                if( (2 == nybbles) and ( (unsigned char)dest[0] == value ) ){
-                    // same as default
-                }else{
-                    printf( "index: 0x%x ", index );
-                    printf( "[0x%x = %c]", context, context_letter);
-                    putchar('[');
-                    print_as_c_literal( dest, (nybbles+1)/2 );
-                    putchar(']');
-                    Word_in_nybble_table_type word = table[context][index];
-                    assert( 0 == word.next_index );
-                    if( word.recently_used ){ printf( "(recent)" ); };
-                    int prefix_index = word.prefix_word_index;
-                    assert( 0 == table[context][prefix_index].leaf );
-                    printf( "\n" );
-                }; 
-            };
-        };
-    };
-}
 
-void
-increment_table_index( int context, int next_word_index[num_contexts]  ){
-    /*
-    Normally this is simply
-        next_word_index[context]++;
-    except for:
-    * wrap-around
-    * only prune leaves.
-    */
-    bool leaf = true;
-    int next_index = next_word_index[context];
-    do{
-        next_index++;
-        #define wraptype only_hi_bit_set
-        #if only_hi_bit_set == wraptype
-            if( 0x100 <= next_index ){
-                // wrap around from compressed index "0xff" to "0x80".
-                next_index = 0x80;
-            };
-        #elif every_byte_but_null == wraptype
-            if( 0x100 <= next_index ){
-                // wrap around, skipping NULL
-                next_index = 1;
-            };
-            // skip over the isliteral() nybbles
-            if( (0x10 <= next_index) and (next_index <= 0x1f) ){
-                next_index = 0x20;
-            };
-        #elif only_c_source_characters
-            if( 0x7f <= next_index ){
-                // wrap around, skipping NULL
-                next_index = 0x20;
-            };
-            // FIXME: skip over the isliteral() nybbles
-        #else
-            #error "no wrap type set. Sorry."
-        #endif
-        /* FIXME:
-        only prune leaves.
-        If this current index is *not* a leaf,
-        try the next one.
-        FIXME:
-        how to avoid infinite loop here?
-        leaf = table[context][next_index].leaf;
-        */
-    }while(!leaf);
-    if( ! table[context][next_index].leaf ){
-        printf( "context %x, index %x, is not a leaf.\n", context, next_index );
-    };
-    /*
-    assert( table[context][next_index].leaf );
-    */
-
-    next_word_index[context] = next_index;
-};
 
 /*
 Given the context and index of 2 consecutive indexes
@@ -1361,7 +1125,7 @@ test_nybble_compress_index(
     int nybble_offset = (unsigned) original_nybble_offset;
     *dest = get_nybble( source, nybble_offset );
     return 1;
-};
+}
 
 
 void test_nybble_compress( const char * source_original, char * dest_original ){
