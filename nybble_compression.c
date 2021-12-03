@@ -786,10 +786,6 @@ void decompress( const char * source, char * dest_original ){
     decompress_bytestring( source, dest_original );
 }
 
-
-
-
-
 void
 debug_print_nybbles( const char * source, int nybbles ){
     int i=0;
@@ -804,124 +800,6 @@ debug_print_nybbles( const char * source, int nybbles ){
 
 void compress( const char * source_original, char * dest_original ){
     compress_bytestring( source_original, dest_original );
-
-
-
-
-/*
-mock test used as a quick test of the decoder
-*/
-int
-test_byte_compress_index(
-    int compression_table[num_contexts][word_indexes][16],
-    int next_word_index[num_contexts],
-    int context, const char * source, char * dest, bool original_nybble_offset
-){
-    *dest = *source;
-    increment_table_index( context, next_word_index );
-    return 2;
-};
-
-void
-test_byte_compress( const char * source_original, char * dest_original ){
-    const char * source = source_original;
-    char * dest = dest_original;
-    int compression_type = EIGHT_BIT_PRUNED;
-
-    int compression_table[num_contexts][word_indexes][16] = { };
-
-    int next_word_index[num_contexts] = {0};
-    initialize_table( next_word_index );
-    printf("table after first initialization:\n");
-    debug_print_table_contents();
-    printf("compressing ...\n");
-
-    *dest++ = compression_type;
-    /* FIXME: implement */
-        source = source_original;
-        // first byte copied unchanged, in order to provide context
-        *dest++ = *source++;
-        bool nybble_offset = 0;
-        // int previous_context = 0;
-        while( *source ){ // assume null-terminated string -- is this wise?
-            int context = byte_to_context( dest[-1] );
-            int nybbles = test_byte_compress_index(
-                compression_table,
-                next_word_index,
-                context, source, dest, nybble_offset
-                );
-
-            // each compressed index uses 1 byte
-            assert( 256 >= word_indexes );
-            dest++;
-
-            debug_print_nybbles( source, nybbles+nybble_offset );
-            assert( 1 <= nybbles );
-            source += ((nybbles+nybble_offset) >> 1);
-            nybble_offset ^= (nybbles bitand 1);
-            // previous_context = context;
-        };
-    *dest = '\0'; // null termination.
-    printf("table after some compression:\n");
-    debug_print_table_contents();
-
-    size_t source_length = strlen( source_original );
-    printf( "source_length: %zi.\n", source_length );
-    size_t compressed_length = strlen( dest_original ); // assume null-terminated -- wise?
-
-    if( compressed_length >= source_length ){
-        compression_type = LITERAL;
-    };
-
-    if( LITERAL == compression_type ){
-        printf("incompressible section; copying as literals.");
-        source = source_original;
-        dest = dest_original;
-        *dest++ = compression_type;
-        while( *source ){ // assume null-terminated string -- is this wise?
-            *dest++ = *source++;
-        };
-        *dest = '\0'; // null termination.
-    };
-}
-
-
-int
-test_nybble_compress_index(
-    int next_word_index[num_contexts],
-    int context, const char * source, char * dest, bool original_nybble_offset
-){
-    int nybble_offset = (unsigned) original_nybble_offset;
-    *dest = get_nybble( source, nybble_offset );
-    return 1;
-}
-
-
-void test_nybble_compress( const char * source_original, char * dest_original ){
-    const char * source = source_original;
-    char * dest = dest_original;
-    int compression_type = EIGHT_BIT_PRUNED;
-    int next_word_index[num_contexts] = {0};
-
-    *dest++ = compression_type;
-    /* FIXME: implement */
-        source = source_original;
-        // first byte copied unchanged, in order to provide context
-        *dest++ = *source++;
-        bool nybble_offset = 0;
-        while( *source ){ // assume null-terminated string -- is this wise?
-            int nybbles = test_nybble_compress_index(
-                next_word_index,
-                0, source, dest, nybble_offset
-                );
-            dest++;
-
-            debug_print_nybbles( source, nybbles+nybble_offset );
-            assert( 1 <= nybbles );
-            source += ((nybbles+nybble_offset) >> 1);
-            nybble_offset ^= (nybbles bitand 1);
-        };
-    *dest = '\0'; // null termination.
 }
 
 int main( void ){
