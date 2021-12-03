@@ -782,7 +782,8 @@ write_nybble( int nybble, char * dest, bool nybble_offset ){
 }
 
 
-void decompress( const char * source, char * dest_original ){
+void
+nybble_decompress( const char * source, char * dest_original ){
     decompress_bytestring( source, dest_original );
 }
 
@@ -798,7 +799,8 @@ debug_print_nybbles( const char * source, int nybbles ){
     putchar( ')' );
 }
 
-void compress( const char * source_original, char * dest_original ){
+void
+nybble_compress( const char * source_original, char * dest_original ){
     compress_bytestring( source_original, dest_original );
 }
 
@@ -810,7 +812,7 @@ int main( void ){
     decompress_bytestring( compressed_text, decompressed_text );
     printf("quick test b: [%s]\n", decompressed_text);
 
-    decompress( compressed_text, decompressed_text );
+    nybble_decompress( compressed_text, decompressed_text );
     printf("quick test n: [%s]\n", decompressed_text);
 
     char text[100] =
@@ -823,7 +825,7 @@ int main( void ){
     printf("testing with [%s].\n", text );
 
     printf("quick test with test_compress_bytestring ...\n");
-    test_compress_bytestring( text, compressed_text );
+    nybble_compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
     assert( strlen( compressed_text ) <= 70 );
     decompress_bytestring( compressed_text, decompressed_text );
@@ -851,38 +853,16 @@ int main( void ){
         printf("Successful test.\n");
     };
 
-// FIXME: do exhaustive test of both bytestring and nybblestring compression.
+    // FIXME: do exhaustive test
 
-    test_nybble_compress( text, compressed_text );
-    /*
-    Except for
-    the "8-bit pruned" header, and
-    the first byte passed straight through verbatim,
-    this test produces 2 "compressed" bytes for each original byte;
-    */
-    assert( 0 != compressed_text[ 2*(text_length-1) + 1 ] );
-    assert( 0 == compressed_text[ 2*(text_length-1) + 2 ] );
-    print_as_c_string( compressed_text, 2*text_length+1 );
-    /*
-    decompress( compressed_text, decompressed_text );
-    printf("decompressed: [%s]\n", decompressed_text);
-    if( memcmp( text, decompressed_text, text_length ) ){
-        printf("Error: decompressed text doesn't match original text.\n");
-        printf("[%s] original\n", text);
-        printf("[%s] decompressed\n", decompressed_text);
-    }else{
-        printf("Successful test.\n");
-    };
-    */
-
-    /*
+        /*
     For the first 128 bytes or so,
     the hi-bit-clear bytes represent themselves --
     quick test of the decoder.
     */
-    test_byte_compress( text, compressed_text );
+    nybble_compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
-    decompress( compressed_text, decompressed_text );
+    nybble_decompress( compressed_text, decompressed_text );
     printf("decompressed: [%s]\n", decompressed_text);
     if( memcmp( text, decompressed_text, text_length ) ){
         printf("Error: decompressed text doesn't match original text.\n");
@@ -892,9 +872,9 @@ int main( void ){
         printf("Successful test.\n");
     };
 
-    compress( text, compressed_text );
+    nybble_compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
-    decompress( compressed_text, decompressed_text );
+    nybble_decompress( compressed_text, decompressed_text );
     printf("decompressed: [%s]\n", decompressed_text);
     if( memcmp( text, decompressed_text, text_length ) ){
         printf("Error: decompressed text doesn't match original text.\n");
