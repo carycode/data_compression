@@ -520,6 +520,7 @@ void decompress_bytestring( const char * source, char * dest_original ){
         *dest++ = *source++;
         int nybble_offset = 0;
         while( *source ){
+            assert( (0 == nybble_offset) or (1 == nybble_offset) );
             int index = (unsigned char)*source++;
             // context is the most recent byte
             int context = byte_to_context( (unsigned char)dest[-1] );
@@ -542,6 +543,11 @@ void decompress_bytestring( const char * source, char * dest_original ){
             };
             int nybbles_used = decompress_nybble(
                 context_table, context, nybble, next_nybble, dest
+            );
+            update_context(
+                &context_table,
+                context,
+                dest[0]
             );
             print_as_c_literal( source, 1 );
             printf(": ");
@@ -635,7 +641,7 @@ void compress_bytestring( const char * source_original, char * dest_original){
     int nybble_offset = 0;
     while( *source ){ // assume null-terminated string -- is this wise?
         int context = byte_to_context( source[-1] );
-        int bytes = compress_byte_index(
+        int nybbles = compress_byte_index(
             &context_table,
             nybble_offset,
             context, source, dest
@@ -650,18 +656,23 @@ void compress_bytestring( const char * source_original, char * dest_original){
         update_dictionary(previous_context, previous_index, context, index, tochange);
         increment_dictionary_index( context );
         */
-        // each compressed index uses 1 byte
-        dest++;
 
-        print_as_c_literal( source, bytes );
-        assert( 1 <= bytes );
-        if( dest[-1] bitand 0x80 ){
-            assert( 1 < bytes );
+        print_as_c_literal( source, 1 );
+        // add 1 or 2 nybbles to dest each iteration
+        assert( 1 <= nybbles );
+        if( dest[0] bitand 0x80 ){
+            assert( 2 == nybbles);
         }else{
-            assert( 1 == bytes );
+            assert( 1 == nybbles);
         };
-        source += bytes;
-        // previous_context = context;
+        nybble_offset += nybbles;
+        if( nybble_offset > 1 ){
+            dest++;
+            nybble_offset -= 2;
+        };
+        assert( nybble_offset < 2 );
+        // consume 1 byte from source each iteration
+        source += 1;
     };
     *dest = '\0'; // null termination.
     printf("table after some compression:\n");
@@ -772,90 +783,12 @@ write_nybble( int nybble, char * dest, bool nybble_offset ){
 
 
 void decompress( const char * source, char * dest_original ){
-    char * dest = dest_original;
-    size_t compressed_length = strlen( source );
-    printf( "compressed_length: %zi.\n", compressed_length );
-    int compression_type = *source++;
-    if( EIGHT_BIT_PRUNED == compression_type ){
-        /* FIXME: */
-        int next_word_index[num_contexts] = {0};
-        initialize_table( next_word_index );
-        bool nybble_offset = 0;
-        int previous_index = source[0];
-        // first byte copied unchanged, in order to provide context
-        *dest++ = *source++;
-        int previous_context = ' ';
-        while( *source ){
-            int index = *source++;
-            // should context be the most recent complete aligned byte,
-            // or the most recent (possibly unaligned) 2 nybbles?
-            int context = byte_to_context( dest[-1] );
-            int tochange = next_word_index[context];
-            update_table(previous_context, previous_index, context, index, tochange);
-            increment_table_index( context, next_word_index );
-            int nybbles = decompress_index( context, index, dest, nybble_offset );
-            assert( 1 <= nybbles );
-
-            
-            dest += ((nybbles+nybble_offset) >> 1);
-            nybble_offset ^= (nybbles bitand 1);
-            previous_context = context;
-            previous_index = index;
-        };
-        debug_print_table_contents();
-    }else if( LITERAL == compression_type ){
-        while( *source ){ // assume null-terminated string -- is this wise?
-            *dest++ = *source++;
-        };
-    }else{
-        printf("invalid compressed data");
-    };
-    *dest = '\0'; // null termination.
-    size_t decompressed_length = strlen( dest_original ); // assume null-terminated -- wise?
-    printf( "decompressed_length: %zi.\n", decompressed_length );
+    decompress_bytestring( source, dest_original );
 }
 
 
 
-int get_nybble( const char * source, bool nybble_offset ){
-    #if little_endian
-    int first_nybble = (*source) bitand 0x0f;
-    int second_nybble = ((*source) >> 4) bitand 0x0f;
-    #else
-    int first_nybble = ((*source) >> 4) bitand 0x0f;
-    int second_nybble = (*source) bitand 0x0f;
-    #endif
-    if( nybble_offset ){
-        int nybble = nybble2index( second_nybble );
-        return nybble;
-    }else{
-        int nybble = nybble2index( first_nybble );
-        return nybble;
-    };
-};
 
-int
-compress_index(
-    int compression_table[num_contexts][word_indexes][16],
-    int next_word_index[num_contexts],
-    int context, const char * source, char * dest, bool original_nybble_offset
-){
-    int nybble_offset = (unsigned) original_nybble_offset;
-    // normal compression
-    int nybbles_eaten = 0;
-    int selected_index = 0;
-    int next_index = nybble2index( get_nybble( source + (nybble_offset >> 1), nybble_offset bitand 1 ) );
-    do{
-        nybble_offset++;
-        nybbles_eaten++;
-        int nybble = get_nybble( source + (nybble_offset >> 1), nybble_offset bitand 1 );
-        selected_index = next_index;
-        next_index = compression_table[context][selected_index][nybble];
-    }while( next_index );
-    *dest = selected_index;
-    increment_table_index( context, next_word_index );
-    return nybbles_eaten;
-};
 
 void
 debug_print_nybbles( const char * source, int nybbles ){
@@ -870,66 +803,9 @@ debug_print_nybbles( const char * source, int nybbles ){
 }
 
 void compress( const char * source_original, char * dest_original ){
-    const char * source = source_original;
-    char * dest = dest_original;
-    int compression_type = EIGHT_BIT_PRUNED;
+    compress_bytestring( source_original, dest_original );
 
-    int compression_table[num_contexts][word_indexes][16] = { };
 
-    int next_word_index[num_contexts] = {0};
-    initialize_table( next_word_index );
-    printf("table after first initialization:\n");
-    debug_print_table_contents();
-    printf("compressing ...\n");
-
-    *dest++ = compression_type;
-    /* FIXME: implement */
-        source = source_original;
-        // first byte copied unchanged, in order to provide context
-        *dest++ = *source++;
-        bool nybble_offset = 0;
-        // int previous_context = 0;
-        while( *source ){ // assume null-terminated string -- is this wise?
-            int context = byte_to_context( dest[-1] );
-            int nybbles = compress_index(
-                compression_table,
-                next_word_index,
-                context, source, dest, nybble_offset
-                );
-
-            // each compressed index uses 1 byte
-            assert( 256 >= word_indexes );
-            dest++;
-
-            debug_print_nybbles( source, nybbles+nybble_offset );
-            assert( 1 <= nybbles );
-            source += ((nybbles+nybble_offset) >> 1);
-            nybble_offset ^= (nybbles bitand 1);
-            // previous_context = context;
-        };
-    *dest = '\0'; // null termination.
-    printf("table after some compression:\n");
-    debug_print_table_contents();
-
-    size_t source_length = strlen( source_original );
-    printf( "source_length: %zi.\n", source_length );
-    size_t compressed_length = strlen( dest_original ); // assume null-terminated -- wise?
-
-    if( compressed_length >= source_length ){
-        compression_type = LITERAL;
-    };
-
-    if( LITERAL == compression_type ){
-        printf("incompressible section; copying as literals.");
-        source = source_original;
-        dest = dest_original;
-        *dest++ = compression_type;
-        while( *source ){ // assume null-terminated string -- is this wise?
-            *dest++ = *source++;
-        };
-        *dest = '\0'; // null termination.
-    };
-}
 
 
 /*
