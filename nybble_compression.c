@@ -135,6 +135,33 @@ with the byte after B.
 This occasionally has 1 literal unaligned,
 but never a long string of unaligned literals.
 
+To make debugging easier,
+the current version
+doesn't bother compressing in the awkward case --
+when we are byte-aligned
+and we *could* compress the next byte,
+but the byte after that isn't in the table
+(and would be emitted as a literal),
+simply leave both bytes uncompressed.
+I.e.,
+when have a consecutive string
+of bytes that *could* be compressed,
+if it's an odd length
+then leave the first or last byte uncompressed,
+so we always
+compress into even numbers of nybbles
+and so integer numbers of bytes.
+(This implies that
+the second nybble in a compressed byte
+is always compressed --
+perhaps we could then
+use all 4 bits in that nybble
+to select one of the 16 most-frequent letters,
+allowing us to compress
+some letters that otherwise we would be
+forced to expand as literals.
+)
+
 Is there a better way
 to keep literal bytes
 aligned on byte boundaries?
@@ -448,7 +475,7 @@ int update_context(
 ){
     // put output_byte in position 0, moving all other letters
     // but first grab old value that was in position 0
-    int context = (int)(unsigned char)context_byte;
+    int context = byte_to_context( context_byte );
     char new_letter = output_byte;
     int position = 0;
     do{
@@ -474,7 +501,7 @@ void
 debug_print_dictionary_contents(
     context_table_type context_table
 ){
-    printf( "decompression dictionary: \n" );
+    printf( "dictionary: \n" );
     int context = 0;
     for( context=0; context<num_contexts; context++ ){
         int index = 0;
@@ -505,12 +532,18 @@ Something like
 */
 #define NYBBLES (0xAF) /* arbitrarily chosen */
 #define LITERAL (' ')  /* arbitrarily chosen */
-void decompress_bytestring( const char * source, char * dest_original ){
+void
+decompress_bytestring(
+    const char * source,
+    char * dest_original,
+    bool modify
+){
     char * dest = dest_original;
     size_t compressed_length = strlen( source );
     printf( "compressed_length: %zi.\n", compressed_length );
-    int compression_type = *source++;
+    int compression_type = source[0];
     if( NYBBLES == compression_type ){
+        source++;
         context_table_type context_table;
         initialize_dictionary( &context_table );
         printf("dictionary after first initialization:\n");
@@ -544,11 +577,13 @@ void decompress_bytestring( const char * source, char * dest_original ){
             int nybbles_used = decompress_nybble(
                 context_table, context, nybble, next_nybble, dest
             );
-            update_context(
+            if(modify){
+              update_context(
                 &context_table,
                 context,
                 dest[0]
-            );
+              );
+            };
             print_as_c_literal( source, 1 );
             printf(": ");
             print_as_c_literal(dest, 1);
@@ -564,7 +599,14 @@ void decompress_bytestring( const char * source, char * dest_original ){
         };
         printf("final dictionary:\n");
         debug_print_dictionary_contents(context_table);
+    }else if( LITERAL == compression_type ){
+        // uncompressed literals
+        source++;
+        while( *source ){ // assume null-terminated string -- is this wise?
+            *dest++ = *source++;
+        };
     }else{
+        assert( source[0] < 0x80 );
         // uncompressed literals
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
@@ -579,8 +621,9 @@ int
 compress_byte_index(
     context_table_type * context_table,
     int nybble_offset,
-    int context, const char * source, char * dest
+    const char * source, char * dest
 ){
+    int context = byte_to_context( source[-1] );
     char s = source[0];
     // If this character
     // is in the context table, compress it.
@@ -598,15 +641,38 @@ compress_byte_index(
     if( c != s ){
         // not in context table.
         // emit as literal.
-        *dest = s;
-        update_context(
-            context_table,
-            source[-1],
-            s
-        );
-        return 2;
+        if(0 == nybble_offset){
+            *dest = s;
+            return 2;
+        }else{
+            #if 1
+            // To make debugging easier,
+            // make this literal byte-aligned,
+            // by re-formatting
+            // the byte compressed
+            // into the hi nybble of dest
+            // into a literal.
+            dest[0] = source[-1];
+            dest[1] = s;
+            return 3;
+            #endif
+            #if 0
+            // split literal across
+            // last nybble of one byte
+            // and first nybble of next byte.
+            // 1 == nybble_offset
+            // there's probably a better way
+            // that keeps more literals byte-aligned
+            int hi = (c >> 4) bitand 0xf;
+            int lo = (c     ) bitand 0xf;
+            dest[0] |= hi;
+            dest[1] = lo << 4;
+            return 2;
+            #endif
+        };
     };
 
+    // emit as compressed nybble
 
     int nybble = (i-1) bitor 0x8;
     if(0 == nybble_offset){
@@ -614,16 +680,16 @@ compress_byte_index(
     }else{
         *dest |= nybble;
     };
-    update_context(
-            context_table,
-            source[-1],
-            s
-    );
     return 1;
 }
 
 
-void compress_bytestring( const char * source_original, char * dest_original){
+void
+compress_bytestring(
+    const char * source_original,
+    char * dest_original,
+    bool modify
+){
     const char * source = source_original;
     char * dest = dest_original;
     int compression_type = NYBBLES;
@@ -637,14 +703,16 @@ void compress_bytestring( const char * source_original, char * dest_original){
     *dest++ = compression_type;
     // first byte copied unchanged, in order to provide context
     *dest++ = *source++;
+    printf( "%c%c;", source[-1], dest[-1] );
     // int previous_context = 0;
     int nybble_offset = 0;
     while( *source ){ // assume null-terminated string -- is this wise?
-        int context = byte_to_context( source[-1] );
+        assert( source[0] < 0x80 );
+        // int context = byte_to_context( source[-1] );
         int nybbles = compress_byte_index(
             &context_table,
             nybble_offset,
-            context, source, dest
+            source, dest
             );
 
         /*
@@ -656,16 +724,71 @@ void compress_bytestring( const char * source_original, char * dest_original){
         update_dictionary(previous_context, previous_index, context, index, tochange);
         increment_dictionary_index( context );
         */
+        if(modify){
+            update_context(
+                &context_table,
+                source[-1],
+                source[0]
+            );
+        };
 
+        /*
+        printf("%i", nybbles);
         print_as_c_literal( source, 1 );
-        // add 1 or 2 nybbles to dest each iteration
+        */
+        // add 1 or 2 or 3 nybbles to dest each iteration
         assert( 1 <= nybbles );
+        assert( 3 >= nybbles );
+        /*
         if( dest[0] bitand 0x80 ){
             assert( 2 == nybbles);
         }else{
             assert( 1 == nybbles);
         };
+        */
+        if( 3 == nybbles ){
+            assert( 1 == nybble_offset );
+            // previous and current byte now literals
+            printf( "%c%c%c%c;",
+                source[-1],
+                source[0],
+                dest[0],
+                dest[1]
+                );
+        }else if( (2 == nybbles) and (0 == nybble_offset) ){
+            // emitted a literal
+            printf( "%c%c;", source[0], dest[0] );
+        }else if( (2 == nybbles) and (1 == nybble_offset) ){
+            // Originally intended to allow
+            // unaligned "literals", but currently
+            // should never happen
+            assert(0);
+        }else if( (1 == nybbles) and (1 == nybble_offset) ){
+            // previous and current byte compressed into 1 byte
+            printf( "%c%c",
+                source[-1],
+                source[0]
+                );
+            print_as_c_literal( dest, 1 );
+            printf(";");
+        }else if( (1 == nybbles) and (0 == nybble_offset) ){
+            // this byte compressed into 1 nybble,
+            // but might later be expanded.
+            // will be printed out later under "3" or "1" nybbles.
+            // previous and current byte compressed into 1 byte
+            printf( "(%c)",
+                source[0]
+                );
+        }else{
+            // should never happen.
+            assert(0);
+        };
         nybble_offset += nybbles;
+
+        if( nybble_offset > 1 ){
+            dest++;
+            nybble_offset -= 2;
+        };
         if( nybble_offset > 1 ){
             dest++;
             nybble_offset -= 2;
@@ -694,9 +817,8 @@ void compress_bytestring( const char * source_original, char * dest_original){
         // 7-bit data, without high-bit-set.
         // FUTURE:
         // consider something like
-        // *dest++ = compression_type;
+        *dest++ = compression_type;
         // to support 8-bit data.
-        assert( source[0] < 128 );
         
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
@@ -784,7 +906,7 @@ write_nybble( int nybble, char * dest, bool nybble_offset ){
 
 void
 nybble_decompress( const char * source, char * dest_original ){
-    decompress_bytestring( source, dest_original );
+    decompress_bytestring( source, dest_original, true );
 }
 
 void
@@ -801,7 +923,7 @@ debug_print_nybbles( const char * source, int nybbles ){
 
 void
 nybble_compress( const char * source_original, char * dest_original ){
-    compress_bytestring( source_original, dest_original );
+    compress_bytestring( source_original, dest_original, true );
 }
 
 int main( void ){
@@ -809,7 +931,7 @@ int main( void ){
     printf( "%s", compressed_text );
     char decompressed_text[100];
 
-    decompress_bytestring( compressed_text, decompressed_text );
+    decompress_bytestring( compressed_text, decompressed_text, false );
     printf("quick test b: [%s]\n", decompressed_text);
 
     nybble_decompress( compressed_text, decompressed_text );
@@ -824,26 +946,28 @@ int main( void ){
     int text_length = strlen(text);
     printf("testing with [%s].\n", text );
 
-    printf("quick test with test_compress_bytestring ...\n");
-    nybble_compress( text, compressed_text );
+    printf("quick test with compress_bytestring ...\n");
+    compress_bytestring( text, compressed_text, false );
     print_as_c_string( compressed_text, strlen(compressed_text) );
     assert( strlen( compressed_text ) <= 70 );
-    decompress_bytestring( compressed_text, decompressed_text );
+    decompress_bytestring( compressed_text, decompressed_text, false );
     printf("decompressed: [%s]\n", decompressed_text);
+    print_as_c_string( decompressed_text, strlen(decompressed_text) );
     if( memcmp( text, decompressed_text, text_length ) ){
         printf("Error: decompressed text doesn't match original text.\n");
         printf("[%s] original\n", text);
         printf("[%s] decompressed\n", decompressed_text);
+        assert(0);
     }else{
         printf("Successful test.\n");
     };
 
-    printf("testing compress_bytestring ...\n");
-    compress_bytestring( text, compressed_text );
+    printf("testing nybble_compress ...\n");
+    nybble_compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
     assert( strlen( compressed_text ) <= 70 );
     printf("testing decompress_bytestring ...\n");
-    decompress_bytestring( compressed_text, decompressed_text );
+    nybble_decompress( compressed_text, decompressed_text );
     printf("decompressed: [%s]\n", decompressed_text);
     if( memcmp( text, decompressed_text, text_length ) ){
         printf("Error: decompressed text doesn't match original text.\n");
@@ -855,11 +979,6 @@ int main( void ){
 
     // FIXME: do exhaustive test
 
-        /*
-    For the first 128 bytes or so,
-    the hi-bit-clear bytes represent themselves --
-    quick test of the decoder.
-    */
     nybble_compress( text, compressed_text );
     print_as_c_string( compressed_text, strlen(compressed_text) );
     nybble_decompress( compressed_text, decompressed_text );
@@ -880,11 +999,11 @@ int main( void ){
         printf("Error: decompressed text doesn't match original text.\n");
         printf("[%s] original\n", text);
         printf("[%s] decompressed\n", decompressed_text);
+        assert(0);
     }else{
         printf("Successful test.\n");
     };
-
-
+    printf("Done testing nybble_compression.");
 
     return 0;
 }
