@@ -331,7 +331,10 @@ perhaps we allow this to be scalable to 2 or even only 1 context.
 #define num_contexts (16)
 int byte_to_context( char byte ){
     // "clever" code that assumes num_contexts is a power of 2.
-    return ((byte>>3) bitand (num_contexts-1));
+    int context = (byte>>3) bitand (num_contexts-1);
+    assert( context < num_contexts );
+    assert( 0 <= context );
+    return (context);
 }
 /*
 If I used
@@ -449,10 +452,10 @@ void print_as_c_string( const char * s, int length ){
 
 int decompress_nybble(
     context_table_type context_table,
-    const char context,
     const char nybble, const char next_nybble,
     char * dest
 ){
+    const int context = byte_to_context( dest[-1] );
     char output_byte;
     if( nybble bitand 0x08 ){
         // hi bit of nybble set -- it's compressed.
@@ -541,7 +544,7 @@ decompress_bytestring(
     char * dest = dest_original;
     size_t compressed_length = strlen( source );
     printf( "compressed_length: %zi.\n", compressed_length );
-    int compression_type = source[0];
+    int compression_type = (unsigned char)(source[0]);
     if( NYBBLES == compression_type ){
         source++;
         context_table_type context_table;
@@ -549,16 +552,14 @@ decompress_bytestring(
         printf("dictionary after first initialization:\n");
         debug_print_dictionary_contents(context_table);
         // first byte copied unchanged, in order to provide context
-        printf( "'%c': (%c)", source[0], source[0] );
         *dest++ = *source++;
+        printf( "'%c': (%c)\n", source[-1], dest[-1] );
         int nybble_offset = 0;
         while( *source ){
             assert( (0 == nybble_offset) or (1 == nybble_offset) );
-            int index = (unsigned char)*source++;
-            // context is the most recent byte
-            int context = byte_to_context( (unsigned char)dest[-1] );
+            int index = (unsigned char)source[0];
             // FUTURE:
-            // rather than splitting up literals pre-emtively here
+            // rather than splitting up literals pre-emptively here
             // and then later noticing it's a literal
             // and re-assembling it in decompress_nybble,
             // perhaps better to leave source byte
@@ -575,12 +576,12 @@ decompress_bytestring(
                 next_nybble = (source[1] >> 4) bitand 0xF;
             };
             int nybbles_used = decompress_nybble(
-                context_table, context, nybble, next_nybble, dest
+                context_table, nybble, next_nybble, dest
             );
             if(modify){
               update_context(
                 &context_table,
-                context,
+                dest[-1],
                 dest[0]
               );
             };
@@ -601,11 +602,13 @@ decompress_bytestring(
         debug_print_dictionary_contents(context_table);
     }else if( LITERAL == compression_type ){
         // uncompressed literals
+        printf("LITERAL == compression_type\n");
         source++;
         while( *source ){ // assume null-terminated string -- is this wise?
             *dest++ = *source++;
         };
     }else{
+        printf("unknown compression_type?\n");
         assert( source[0] < 0x80 );
         // uncompressed literals
         while( *source ){ // assume null-terminated string -- is this wise?
@@ -625,6 +628,7 @@ compress_byte_index(
 ){
     int context = byte_to_context( source[-1] );
     char s = source[0];
+    // assert( s < 0x80 );
     // If this character
     // is in the context table, compress it.
     // Otherwise emit it as a literal.
@@ -751,8 +755,8 @@ compress_bytestring(
             // previous and current byte now literals
             printf( "%c%c%c%c;",
                 source[-1],
-                source[0],
                 dest[0],
+                source[0],
                 dest[1]
                 );
         }else if( (2 == nybbles) and (0 == nybble_offset) ){
