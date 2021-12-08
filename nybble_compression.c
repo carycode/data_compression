@@ -336,6 +336,10 @@ int byte_to_context( char byte ){
     assert( 0 <= context );
     return (context);
 }
+char context_to_byte( int context ){
+    char byte = (context << 3);
+    return (byte);
+}
 /*
 If I used
 const int num_contexts = 32;
@@ -351,7 +355,7 @@ http://c-faq.com/ansi/constasconst.html
 typedef struct context_table_type {
     char letter[num_contexts][letters_per_context];
     // only used for debug performance monitoring
-    int times_used_directly;
+    int times_used_directly[num_contexts];
 } context_table_type;
 
 void initialize_dictionary(
@@ -359,6 +363,7 @@ void initialize_dictionary(
 ){
     int context=0;
     for( context=0; context<num_contexts; context++ ){
+        context_table->times_used_directly[context] = 0;
         context_table->letter[context][0] = ' ';
         context_table->letter[context][1] = 'e';
         context_table->letter[context][2] = 't';
@@ -490,6 +495,7 @@ int update_context(
         ( position < letters_per_context ) and
         (new_letter != output_byte)
     );
+    context_table->times_used_directly[context]++;
 
     assert( output_byte == context_table->letter[context][0] );
     return 0;
@@ -515,10 +521,15 @@ debug_print_dictionary_contents(
         // maps to this context.
         // (probably the lowercase letters and space
         // are more likely ...)
+        char lo_char = context_to_byte( context );
+        char hi_char = context_to_byte( context+1 ) - 1;
+        lo_char = isprint(lo_char) ? lo_char: '?';
+        hi_char = isprint(hi_char) ? hi_char: '?';
+        printf( "%c..%c: ", lo_char, hi_char );
         for( index=0; index<letters_per_context; index++ ){
             printf( "%c", context_table.letter[context][index] );
         };
-        printf( "\n" );
+        printf( " %i\n", context_table.times_used_directly[context] );
     };
 }
 
