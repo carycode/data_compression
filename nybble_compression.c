@@ -801,6 +801,16 @@ compress_bytestring(
         // consume 1 byte from source each iteration
         source += 1;
     };
+    if( 0 != nybble_offset ){
+        // fix special case of last character
+        // compressed into first nybble --
+        // avoid inserting a bogus
+        // character into the second nybble
+        // by expanding the last character
+        // into a full-byte literal.
+        // dest[0] = source[-1];
+        *dest++ = source[-1];
+    };
     *dest = '\0'; // null termination.
     printf("table after some compression:\n");
     debug_print_dictionary_contents(context_table);
