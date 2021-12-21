@@ -19,7 +19,7 @@ huffman_time_test: n_ary_huffman
 	time --verbose --output=huffman_time_test ./n_ary_huffman < n_ary_huffman.c
 
 nybble_time_test: nybble_compression
-	time --verbose --output=small_time_test ./nybble_compression
+	time --verbose --output=nybble_time_test ./nybble_compression
 
 small_time_test: small_compression
 	time --verbose --output=small_time_test ./small_compression
@@ -33,8 +33,10 @@ CFLAGS += -Wall
 clean:
 	rm -fv -- small_compression
 	rm -fv -- n_ary_huffman
+	rm -fv -- nybble_compression
 	rm -fv -- small_time_test
 	rm -fv -- huffman_time_test
+	rm -fv -- nybble_time_test
 
 #
 

@@ -1653,9 +1653,10 @@ mock test used as a quick test of the decoder
 */
 int
 test_byte_compress_index(
-    int compression_table[num_contexts][word_indexes][16],
+    // int compression_table[num_contexts][word_indexes][16],
     int next_word_index[num_contexts],
-    int context, const char * source, char * dest, bool original_nybble_offset
+    int context, const char * source, char * dest
+    // , bool original_nybble_offset
 ){
     *dest = *source;
     increment_table_index( context, next_word_index );
@@ -1668,7 +1669,7 @@ test_byte_compress( const char * source_original, char * dest_original ){
     char * dest = dest_original;
     int compression_type = EIGHT_BIT_PRUNED;
 
-    int compression_table[num_contexts][word_indexes][16] = {0};
+    // int compression_table[num_contexts][word_indexes][16] = {0};
 
     int next_word_index[num_contexts] = {0};
     initialize_table( next_word_index );
@@ -1686,9 +1687,10 @@ test_byte_compress( const char * source_original, char * dest_original ){
         while( *source ){ // assume null-terminated string -- is this wise?
             int context = byte_to_context( dest[-1] );
             int nybbles = test_byte_compress_index(
-                compression_table,
+                // compression_table,
                 next_word_index,
-                context, source, dest, nybble_offset
+                context, source, dest
+                // , nybble_offset
                 );
 
             // each compressed index uses 1 byte
@@ -1728,8 +1730,9 @@ test_byte_compress( const char * source_original, char * dest_original ){
 
 int
 test_nybble_compress_index(
-    int next_word_index[num_contexts],
-    int context, const char * source, char * dest, bool original_nybble_offset
+    // int next_word_index[num_contexts],
+    // int context,
+    const char * source, char * dest, bool original_nybble_offset
 ){
     int nybble_offset = (unsigned) original_nybble_offset;
     *dest = get_nybble( source, nybble_offset );
@@ -1741,7 +1744,7 @@ void test_nybble_compress( const char * source_original, char * dest_original ){
     const char * source = source_original;
     char * dest = dest_original;
     int compression_type = EIGHT_BIT_PRUNED;
-    int next_word_index[num_contexts] = {0};
+    // int next_word_index[num_contexts] = {0};
 
     *dest++ = compression_type;
     /* FIXME: implement */
@@ -1751,8 +1754,9 @@ void test_nybble_compress( const char * source_original, char * dest_original ){
         bool nybble_offset = 0;
         while( *source ){ // assume null-terminated string -- is this wise?
             int nybbles = test_nybble_compress_index(
-                next_word_index,
-                0, source, dest, nybble_offset
+                // next_word_index,
+                // 0,
+                source, dest, nybble_offset
                 );
             dest++;
 

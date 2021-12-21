@@ -1,5 +1,6 @@
 /* nybble_compression.c
-WARNING: version 2015.00.00.03-alpha : extremely rough draft.
+version 2021.00.01: inital tests pass.
+2021-12-09: passes all initial tests.
 2021-10-13: forked from small_compression.c
 2015-05-24: David Cary started.
 

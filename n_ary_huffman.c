@@ -77,6 +77,12 @@ linefeeds every 70 characters or so.
 
 #define COMPILE_TIME_ASSERT(pred) switch(0){case 0:case pred:;}
 
+/*
+FUTURE:
+consider using
+https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
+*/
+
 // FIXME: support much larger numbers of symbols
 // than 256 'char'.
 void
