@@ -213,6 +213,190 @@ compress those 3 into 1 byte
 (and put the third into the leftover nybble).
 
 
+Much later DAV thinks of this approach:
+* Keep every literal byte
+aligned on byte boundaries
+* compressed text is composed of
+alternating
+strings of 1 or more consecutive literal bytes (always have hi bit 0)
+and strings of 1 or more compressed data bytes (typically hi bit 1).
+Each *complete string* of 1 or more consecutive compressed data bytes
+represents at least 1 plaintext byte,
+but the number of bytes in the compressed string
+has nothing to do with exactly how many plaintext bytes it represents.
+The data in those compressed bytes
+represents plaintext bytes that may go
+* "here" (between the previous and next string of literal bytes)
+* "before here" (somewhere before the previous string of literal bytes,
+but never between 2 literal bytes in the plaintext)
+* "after here" (somewhere after the following string of literal bytes,
+but never between 2 literal bytes in the plaintext).
+For example, let's assume
+the compressor has represented the first and last byte
+of the plaintext as literals
+(this probably isn't really necessary?).
+We have 2 independent pointers:
+The literal pointer that we initialize
+to point to the first byte with hi bit 0
+(which may or may not be the first byte in the plaintext).
+The literal pointer always points to a *byte*
+with the hi bit 0.
+The compressed data pointer
+that we initialize to point to
+to point to the first *bit* of the first byte
+with the hi bit 1
+(which may or may not be the first byte in the plaintext).
+The compressed data pointer
+always points to a *bit*
+inside a byte with the hi bit 1.
+While decompressing:
+* We start out in literals mode.
+* in literals mode, if the next byte has hi bit 0,
+it's a literal; emit it and continue in literals mode.
+* in literals mode, if next byte has hi bit 1,
+it's compressed data -- we'll need to
+uncompress and emit at least 1 compressed byte.
+so we switch to compressed mode.
+* Every byte in the compressed text
+that has hi bit 1 has a few hi bits,
+that represent a compressed byte "here",
+and the remaining "leftover bits" are data
+that is only used in compressed mode,
+but not necessarily immediately after
+that first compressed byte of plaintext.
+* after emitting the first compressed byte,
+we stay in compressed mode.
+While in compressed mode
+we ignore the literals byte-pointer
+and we only use the compressed data bit-pointer.
+* If the bit-pointer is pointing to
+a byte with hi bit 0 (a literals),
+reset it to point to the first bit
+of the next byte with the hi bit 1.
+* If the bit-pointer is pointing to the
+first bit of a byte (the hi bit, which should be 1 by now)
+adjust it to point to the first "leftover" bit
+just past both that hi bit
+and also past the first few hi bits
+that represent a compressed byte "here".
+We somehow figure out
+how many compressed bytes until the next literal.
+(The simplest nybble case,
+as above,
+is
+Read the next bit
+0 == bit 3:
+we've already emitted
+the 1 and only 1 compressed byte,
+and we need to switch back to emitting literals;
+1 = bit 3: the rest of this compressed byte
+represents 1 more literal;
+decode it and switch back to literal mode).
+Whenever we have strings of 2 or more plaintext bytes
+that are all compressed (between
+strings of plaintext bytes that are represented as literals),
+use the "leftover bits"
+(which may be stored in the rest of this compressed byte,
+some previous compressed byte,
+or some future compressed byte)
+to decide which plaintext byte to emit.
+* So we have a bit-pointer
+(initially set to point to the
+first byte with 1=hi bit,
+and pointing to just past the first compressed block
+of this compressed string,
+in the simplest case pointing to the second nybble).
+* in compressed mode,
+we continue eating up "leftover bits"
+of bytes-with-hi-bit-set
+for all the compressed bytes of this string,
+then we switch back to normal mode.
+* Sometimes the bit-pointer used in compressed mode
+lags behind the byte-pointer used in normal mode
+for literals and the first compressed byte;
+other times the bit-pointer runs ahead.
+* In text with few compressible bytes,
+the bit-pointer is still far behind the byte-pointer
+when we reach the end of the text;
+there's still a few "extra bits" that were never used.
+(That's probably OK).
+* In highly compressible text,
+the bit-pointer runs far ahead of the byte-pointer
+when we reach the end of the text.
+Perhaps the simplest way to handle this
+is to always emit the last byte of the plaintext
+as a literal (with hi bit zero),
+then have a bunch of bytes
+with their hi bit set
+after that literal,
+and all of those bytes
+are used as "leftover bits"
+earlier in the text.
+In the simplest nybble case,
+all strings of 3 or more continuous plaintext bytes
+that are all compressed
+slowly eat away at that tail of "leftover bits".
+* After decoding exactly how many compressed bytes
+are part of this string,
+and decompressing and emitting each one,
+we adjust the literal byte pointer
+(if it's pointing at a byte with
+the hi bit 1, we bump it forward
+until it's pointing at a byte
+with the hi bit 0)
+and switch back to literal mode.
+
+Two possible approaches:
+(a) (possibly simpler to debug)
+Literals always have hi bit 0.
+Compressed data always stored in bytes with hi bit 1.
+In compressed mode,
+as we're eating up compressed bits,
+the compressed bit pointer
+eats up "leftover bits" --
+when it eats up the last bit in one byte,
+it jumps ahead to the next byte with the hi bit 1,
+and jumps to the first "leftover bit" in that byte,
+and has no effect on the literal byte pointer.
+(b) (possibly slightly better compression)
+literals always have hi bit 0.
+The end of a literal string
+has a byte of compressed data with hi bit 1,
+but some compressed data bytes may have hi bit 0.
+We have only 1 pointer (a byte pointer) plus
+a 2-byte bit buffer.
+In literal mode,
+we read bytes and emit them if they are literals
+(their hi bit is 0),
+but if the hi bit is 1,
+we cram the remaining 7 bits
+into the end of the bit-buffer,
+make the pointer point to the *following* byte,
+and switch to compressed mode.
+In compressed mode,
+we somehow figure out
+how many consecutive compressed bytes are in this string
+(at least one)
+and then we read bits from the bit buffer
+for each compressed byte, decode it, and emit it.
+(equivalently,
+we unconditionally read bits and decode
+one compressed byte,
+and then later
+figure out how many more compressed bytes are in this string,
+possibly 0 more bytes).
+As we read bits from the bit-buffer,
+if the bit-buffer is empty,
+we unconditionally read
+the next byte through the byte pointer
+and stuff all 8 bits into the bit buffer
+(they are compressed data,
+whether or not the hi bit is 1).
+and bump the byte pointer to the following byte.
+
+
+
+----
 Worst-case expansion of 7-bit data is 1:1 (no expansion).
 
 
