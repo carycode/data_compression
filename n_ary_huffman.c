@@ -58,7 +58,11 @@ base16 digits
 or (for trinary)
 base3 digits
 or
+base9 digits
+or
 base27 digits
+or (for decimal)
+base-10 digits
 or (for senary)
 base6 digits
 or
@@ -113,7 +117,11 @@ histogram(
     // return h;
 }
 
+/* should I use
 typedef struct {
+here?
+*/
+struct node{
     bool leaf;
     int count;
     // only if leaf=false, i.e., this node is internal
@@ -122,7 +130,8 @@ typedef struct {
     // only if leaf=true, i.e., this node is a leaf:
     char leaf_value;
     // FUTURE: make this a union?
-} node;
+    // FIXME: int depth; // only used for length-limited Huffman
+};
 
 /*
 it wouldn't hurt to completely sort,
@@ -198,7 +207,8 @@ and all the symbol_frequencies are positive?
 
 void
 setup_nodes(
-    const int text_symbols, node list[text_symbols],
+    const int text_symbols,
+    struct node list[text_symbols],
     const int * symbol_frequencies, int sorted_index[2*text_symbols]
 ){
     // initialize the leaf nodes
@@ -218,7 +228,7 @@ void
 generate_huffman_tree(
     const int text_symbols,
     const int compressed_symbols,
-    node list[text_symbols],
+    struct node list[text_symbols],
     int sorted_index[2*text_symbols]
 ){
     // count out zero-frequency symbols
@@ -249,7 +259,11 @@ generate_huffman_tree(
 }
 
 void
-summarize_tree_with_lengths( const int text_symbols, node list[text_symbols], int lengths[text_symbols]){
+summarize_tree_with_lengths(
+    const int text_symbols,
+    struct node list[text_symbols],
+    int lengths[text_symbols]
+){
     int sum = 0;
     for( int i=0; i<text_symbols; i++){
         sum += list[i].count;
@@ -261,14 +275,25 @@ void
 debug_print_table( int text_symbols, int canonical_lengths[text_symbols], int compressed_symbols ){
     // FIXME:
     printf( "compressed_symbols: %i \n", compressed_symbols );
+    printf( "(2 === compressed symbols is the common binary case)\n" );
+    printf( "(3 === compressed symbols for trinary)\n" );
+    printf( "text_symbols: %i \n", text_symbols );
+    printf( "(typically text_symbols around 300, one for each byte and a few other special ones, even if most of those byte values never actually occur in the text) \n" );
     for( int i=0; i<text_symbols; i++ ){
-        printf("symbol %i : length %i \n", i, canonical_lengths[i] );
-    }
+        printf("symbol %i : length %i ", i, canonical_lengths[i] );
+        if( isprint( i ) ){
+            printf("(%c)", (char)i );
+        };
+        printf("\n" );
+    };
 }
 
 void test_summarize_tree_with_lengths(void){
+    /* FIXME:
+    int text_symbols = 300;
+    */
     int text_symbols = 3;
-    node list_a[3] = {
+    struct node list_a[3] = {
         { true, 9, 0, 0, 'a' },
         { true, 9, 0, 0, 'b' },
         { false, 4, 0, 1, 0 }
@@ -279,7 +304,7 @@ void test_summarize_tree_with_lengths(void){
     debug_print_table( text_symbols, lengths, compressed_symbols );
     assert( 1 == lengths['a'] );
     assert( 1 == lengths['b'] );
-    node list_b[5] = {
+    struct node list_b[5] = {
         { true, 9, 0, 0, 'a' },
         { true, 9, 0, 0, 'b' },
         { true, 8, 0, 0, 'c' },
@@ -310,7 +335,7 @@ huffman (
     but instead the compiler tells me
     "error: variable-sized object may not be initialized".
     */
-    node list[text_symbols];
+    struct node list[text_symbols];
     int sorted_index[2*text_symbols];
 
     setup_nodes( text_symbols, list, symbol_frequencies, sorted_index );
