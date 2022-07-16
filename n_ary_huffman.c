@@ -125,12 +125,21 @@ struct node{
     bool leaf;
     int count;
     // only if leaf=false, i.e., this node is internal
+    // only for debugging binary trees -- doesn't work for trinary?
     int left_index;
     int right_index;
     // only if leaf=true, i.e., this node is a leaf:
     char leaf_value;
     // FUTURE: make this a union?
     // FIXME: int depth; // only used for length-limited Huffman
+    int parent_index; // for trinary, decimal, etc. trees ?
+    // The true parent index should never be 0,
+    // since index 0 should always be a *literal* leaf,
+    // and the true parent of *any* node
+    // will always be a non-leaf.
+    // We often initialize the parent index to 0
+    // just to indicate that it isn't known yet.
+    // int length; // only for debugging: FIXME: remove.
 };
 
 /*
@@ -164,7 +173,22 @@ at the "best" end --
 the end that requires the least shuffling of other nodes.
 * Rather than a linear list, perhaps a priority heap?
 */
-void partial_sort(){
+void partial_sort(
+    const int list_length,
+    int * sorted_index,
+    struct node * list
+){
+    // FIXME:
+    int a = list_length - 2;
+    int b = list_length - 1;
+    int count_one = list[ sorted_index[ a ] ].count;
+    int count_two = list[ sorted_index[ b ] ].count;
+    if( count_two < count_one ){
+        int c = sorted_index[ a ];
+        int d = sorted_index[ b ];
+        sorted_index[ a ] = d;
+        sorted_index[ b ] = c;
+    };
 }
 
 /*
@@ -207,33 +231,38 @@ and all the symbol_frequencies are positive?
 
 void
 setup_nodes(
-    const int text_symbols,
-    struct node list[text_symbols],
-    const int * symbol_frequencies, int sorted_index[2*text_symbols]
+    const int list_length,
+    struct node list[list_length],
+    const int * symbol_frequencies, // [list_length],
+    int sorted_index[list_length],
+    const int max_leaves
 ){
     // initialize the leaf nodes
     // (typically including the 256 possible literal byte values)
-    for( int i=0; i<text_symbols; i++){
+    for( int i=0; i<max_leaves; i++){
         list[i].leaf = true;
         list[i].leaf_value = i;
         list[i].count = symbol_frequencies[i];
         sorted_index[i] = i;
     };
-    for( int i=text_symbols; i<2*text_symbols; i++){
+    for( int i=max_leaves; i<2*list_length; i++){
+        list[i].leaf = false;
         sorted_index[i] = 0;
     };
 }
 
 void
 generate_huffman_tree(
-    const int text_symbols,
+    // const int text_symbols,
+    const int list_length,
+    struct node list[list_length],
+    int sorted_index[list_length],
     const int compressed_symbols,
-    struct node list[text_symbols],
-    int sorted_index[2*text_symbols]
+    const int max_leaf_value
 ){
     // count out zero-frequency symbols
     int nonzero_text_symbols = 0;
-    for( int i=0; i<text_symbols; i++ ){
+    for( int i=0; i<max_leaf_value; i++ ){
         if( 0 != list[ sorted_index[ i ] ].count ){
             nonzero_text_symbols++ ;
         };
@@ -253,21 +282,63 @@ generate_huffman_tree(
     };
     assert( dummy_nodes < (compressed_symbols - 1) );
 
-    partial_sort( sorted_index, text_symbols, list );
+    partial_sort( list_length, sorted_index, list );
 
 
 }
 
+/*
+Generate a list of "lengths",
+the lengths used in canonical Huffman tables.
+The root node in the Huffman tree has length 0,
+both (for binary)
+or all 10 (for decimal) of the nodes directly "under" the root node
+(i.e., that all point to the root node)
+have length 1 digit,
+the next row has length 2 digits, etc.
+
+The node_list[] is in some arbitrary,
+possibly very-mixed-up order.
+The node corresponding to the letter 'b'
+could be *any* index of the node_list.
+
+The lengths[] contains only the
+length of each leaf node,
+in numerical order.
+The (Huffman-compressed) length of the letter 'b'
+is stored in lengths['b'].
+
+*/
 void
 summarize_tree_with_lengths(
-    const int text_symbols,
-    struct node list[text_symbols],
-    int lengths[text_symbols]
+    const int list_length,
+    struct node list[list_length],
+    // int root_node_index,
+    const int max_leaf_value,
+    int lengths[max_leaf_value+1],
+    const int leaves
 ){
-    int sum = 0;
-    for( int i=0; i<text_symbols; i++){
-        sum += list[i].count;
-        lengths[i] = sum; // FIXME:
+    // All of the leaf nodes
+    // should be the first text_symbols
+    // at the beginning of the list[].
+    // All the internal nodes
+    // should immediately follow.
+    // There may be a few dummy unused nodes (0 == count)
+    // at the end of the list[].
+    assert( list_length > leaves );
+    assert( false == list[leaves].leaf );
+    for( int i=0; i<leaves; i++){
+        assert( true == list[i].leaf );
+        assert( list[i].parent_index ); // every leaf should have a parent
+        // scan up the parent_index up to the root
+        int child = i;
+        int sum = 0;
+        do{
+            sum++;
+            int parent = list[child].parent_index;
+            child = parent;
+        }while( 0 != child );
+        lengths[i] = sum;
     };
 }
 
@@ -292,40 +363,50 @@ void test_summarize_tree_with_lengths(void){
     /* FIXME:
     int text_symbols = 300;
     */
-    int text_symbols = 3;
-    struct node list_a[3] = {
-        { true, 9, 0, 0, 'a' },
-        { true, 9, 0, 0, 'b' },
-        { false, 4, 0, 1, 0 }
+    // const int text_symbols_doubled = 6;
+#define text_symbols_doubled (6)
+    const int text_symbols = (text_symbols_doubled) / 2;
+    struct node list_a[text_symbols_doubled] = {
+        { true, 9, 0, 0, 'a', 2 },
+        { true, 9, 0, 0, 'b', 2 },
+        { false, 4, 0, 1, 0, 0 }
     };
-    int lengths[2*text_symbols];
-    summarize_tree_with_lengths( text_symbols, list_a, lengths );
+    int leaves = 2;
+    int max_leaf_value = 'z';
+    int lengths_a[max_leaf_value+1];
+    int list_length = text_symbols_doubled;
+    summarize_tree_with_lengths( list_length, list_a, max_leaf_value, lengths_a, leaves );
     int compressed_symbols = 2;
-    debug_print_table( text_symbols, lengths, compressed_symbols );
-    assert( 1 == lengths['a'] );
-    assert( 1 == lengths['b'] );
+    debug_print_table( max_leaf_value, lengths_a, compressed_symbols );
+    assert( 1 == lengths_a['a'] );
+    assert( 1 == lengths_a['b'] );
+    list_length = 5;
     struct node list_b[5] = {
-        { true, 9, 0, 0, 'a' },
-        { true, 9, 0, 0, 'b' },
-        { true, 8, 0, 0, 'c' },
-        { false, 17, 1, 2, 0 },
-        { false, 26, 0, 3, 0 }
+        { true, 9, 0, 0, 'a', 4 },
+        { true, 9, 0, 0, 'b', 3 },
+        { true, 8, 0, 0, 'c', 3 },
+        { false, 17, 1, 2, 0, 4 },
+        { false, 26, 0, 3, 0, 0 }
     };
-    summarize_tree_with_lengths( text_symbols, list_b, lengths );
-    assert( 1 == lengths['a'] );
-    assert( 2 == lengths['b'] );
-    assert( 2 == lengths['b'] );
+    leaves = 3;
+    max_leaf_value = 'z';
+    int lengths_b[max_leaf_value+1];
+    summarize_tree_with_lengths( list_length, list_b, max_leaf_value, lengths_b, leaves );
+    assert( 1 == lengths_b['a'] );
+    assert( 2 == lengths_b['b'] );
+    assert( 2 == lengths_b['b'] );
     for( int i=0; i<text_symbols; i++ ){
         // something about shorter lengths having larger frequency counts
     };
 }
 
 void
-huffman (
-    const int * symbol_frequencies,
-    const int text_symbols,
+huffman(
+    const int max_leaf_value,
+    const int * symbol_frequencies, // [max_symbol_value]
     const int compressed_symbols,
-    int lengths[text_symbols]
+    int *  lengths, // [max_symbol_value],
+    const int max_leaf_value_doubled
 ){
     /*
     I wish
@@ -335,18 +416,24 @@ huffman (
     but instead the compiler tells me
     "error: variable-sized object may not be initialized".
     */
-    struct node list[text_symbols];
-    int sorted_index[2*text_symbols];
+    struct node list[max_leaf_value_doubled];
+    int sorted_index[max_leaf_value_doubled];
 
-    setup_nodes( text_symbols, list, symbol_frequencies, sorted_index );
-
-    generate_huffman_tree(
-        text_symbols, compressed_symbols,
-        list,
-        sorted_index
+    const int list_length = max_leaf_value_doubled;
+    setup_nodes(
+        list_length, list, symbol_frequencies, sorted_index,
+        max_leaf_value
     );
 
-    summarize_tree_with_lengths( text_symbols, list, lengths );
+    generate_huffman_tree(
+        list_length,
+        list,
+        sorted_index,
+        compressed_symbols,
+        max_leaf_value
+    );
+
+    summarize_tree_with_lengths( max_leaf_value_doubled, list, max_leaf_value, lengths, max_leaf_value );
 }
 /*
 support streaming:
@@ -448,21 +535,27 @@ next_block(void){
     // FIXME: doesn't yet support reading '\0' bytes
     assert( original_length == used );
     // FIXME: support arbitrary number of symbols.
+    /*
     const int text_symbols = 258;
-    int symbol_frequencies[text_symbols];
-    histogram( original_text, text_symbols, symbol_frequencies );
+    */
+    const int max_symbol_value = 258;
+    int symbol_frequencies[max_symbol_value];
+    histogram( original_text, max_symbol_value, symbol_frequencies );
     int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
     // FUTURE: length-limited Huffman?
 
+    /*
     int canonical_lengths[text_symbols];
-    for( int i=0; i<text_symbols; i++){
+    */
+    int canonical_lengths[max_symbol_value];
+    for( int i=0; i<max_symbol_value; i++){
         canonical_lengths[i] = 0;
     };
     // int canonical_lengths[nonzero_text_symbols] = {};
-    huffman( symbol_frequencies, text_symbols, compressed_symbols, canonical_lengths );
-    debug_print_table( text_symbols, canonical_lengths, compressed_symbols );
+    huffman( max_symbol_value, symbol_frequencies, compressed_symbols, canonical_lengths, (2*max_symbol_value) );
+    debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
     char compressed_text[bufsize+1];
-    compress( text_symbols, canonical_lengths, compressed_symbols, compressed_text );
+    compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
     char decompressed_text[bufsize+1];
     decompress( compressed_text, decompressed_text );
     size_t decompressed_length = strlen( decompressed_text );
