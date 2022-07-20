@@ -70,6 +70,13 @@ base36 digits
 broken by (to-be-ignored)
 linefeeds every 70 characters or so.
 
+Perhaps reserve lines that begin with "#"
+as internal debugging comments,
+intended to be ignored
+by other programs downstream in the pipeline.
+
+FUTURE: length-limited Huffman?
+
 */
 
 #include <stdio.h>
@@ -93,7 +100,7 @@ void
 histogram(
     const char * text,
     const int text_symbols,
-    int h[text_symbols]
+    int h[text_symbols] // output-only
 ){
     /*
     I wish
@@ -228,35 +235,37 @@ so this "huffman()" routine
 only sees the *actual* symbols in use
 and all the symbol_frequencies are positive?
 */
-
 void
 setup_nodes(
     const int list_length,
     struct node list[list_length],
-    const int * symbol_frequencies, // [list_length],
     int sorted_index[list_length],
-    const int max_leaves
+    const int max_leaves,
+    const int * symbol_frequencies // [max_leaves],
 ){
+    printf("# starting setup_nodes.\n");
     // initialize the leaf nodes
     // (typically including the 256 possible literal byte values)
+    assert( max_leaves < list_length );
     for( int i=0; i<max_leaves; i++){
         list[i].leaf = true;
         list[i].leaf_value = i;
         list[i].count = symbol_frequencies[i];
         sorted_index[i] = i;
     };
-    for( int i=max_leaves; i<2*list_length; i++){
+    for( int i=max_leaves; i<list_length; i++){
         list[i].leaf = false;
         sorted_index[i] = 0;
     };
+    printf("# Done setup_nodes.\n");
 }
 
 void
 generate_huffman_tree(
     // const int text_symbols,
     const int list_length,
-    struct node list[list_length],
-    int sorted_index[list_length],
+    struct node list[list_length], // input
+    int sorted_index[list_length], // in-out: updated
     const int compressed_symbols,
     const int max_leaf_value
 ){
@@ -312,22 +321,28 @@ is stored in lengths['b'].
 void
 summarize_tree_with_lengths(
     const int list_length,
-    struct node list[list_length],
+    const struct node list[list_length], // input-only
     // int root_node_index,
     const int max_leaf_value,
-    int lengths[max_leaf_value+1],
+    int lengths[max_leaf_value+1], // output-only
     const int leaves
 ){
+    // zero out the lengths
+    for( int i=0; i<(max_leaf_value+1); i++){
+        lengths[i] = 0;
+    };
     // All of the leaf nodes
     // should be the first text_symbols
     // at the beginning of the list[].
     // All the internal nodes
     // should immediately follow.
-    // There may be a few dummy unused nodes (0 == count)
+    // There may be a few dummy unused nodes (0 == list[x].count)
     // at the end of the list[].
+    printf( "leaves: %i\n", leaves);
     assert( list_length > leaves );
     assert( false == list[leaves].leaf );
     for( int i=0; i<leaves; i++){
+        printf( "{ %i, ... '%c'...}\n", list[i].leaf, list[i].leaf_value );
         assert( true == list[i].leaf );
         assert( list[i].parent_index ); // every leaf should have a parent
         // scan up the parent_index up to the root
@@ -338,7 +353,10 @@ summarize_tree_with_lengths(
             int parent = list[child].parent_index;
             child = parent;
         }while( 0 != child );
-        lengths[i] = sum;
+        sum--; // don't count root node.
+        // lengths[i] = sum;
+        int leaf_value = list[i].leaf_value;
+        lengths[leaf_value] = sum;
     };
 }
 
@@ -380,8 +398,10 @@ void test_summarize_tree_with_lengths(void){
     debug_print_table( max_leaf_value, lengths_a, compressed_symbols );
     assert( 1 == lengths_a['a'] );
     assert( 1 == lengths_a['b'] );
-    list_length = 5;
-    struct node list_b[5] = {
+    printf("# Done with list_a test.\n");
+
+#define list_b_length (5)
+    struct node list_b[list_b_length] = {
         { true, 9, 0, 0, 'a', 4 },
         { true, 9, 0, 0, 'b', 3 },
         { true, 8, 0, 0, 'c', 3 },
@@ -391,15 +411,21 @@ void test_summarize_tree_with_lengths(void){
     leaves = 3;
     max_leaf_value = 'z';
     int lengths_b[max_leaf_value+1];
-    summarize_tree_with_lengths( list_length, list_b, max_leaf_value, lengths_b, leaves );
+    summarize_tree_with_lengths( list_b_length, list_b, max_leaf_value, lengths_b, leaves );
     assert( 1 == lengths_b['a'] );
     assert( 2 == lengths_b['b'] );
-    assert( 2 == lengths_b['b'] );
+    assert( 2 == lengths_b['c'] );
     for( int i=0; i<text_symbols; i++ ){
         // something about shorter lengths having larger frequency counts
     };
+    printf("# Done with list_b test.\n");
 }
 
+/*
+Given a histogram of symbol frequencies,
+generate the optimal length for each symbol
+using the Huffman algorithm.
+*/
 void
 huffman(
     const int max_leaf_value,
@@ -421,8 +447,10 @@ huffman(
 
     const int list_length = max_leaf_value_doubled;
     setup_nodes(
-        list_length, list, symbol_frequencies, sorted_index,
-        max_leaf_value
+        list_length, list,
+        sorted_index,
+        max_leaf_value,
+        symbol_frequencies
     );
 
     generate_huffman_tree(
@@ -435,6 +463,7 @@ huffman(
 
     summarize_tree_with_lengths( max_leaf_value_doubled, list, max_leaf_value, lengths, max_leaf_value );
 }
+
 /*
 support streaming:
 break up input into
@@ -517,15 +546,33 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
     return -1;
 }
 
+/*
+Given a list of lengths
+(one length for each symbol)
+and a block of uncompressed text,
+generate a block of compressed text
+(starting with a compact representation
+of the canonical list of lengths).
+*/
 void compress(){
     // FIXME:
+    assert(0);
 }
+
+/*
+Given a block of compressed text
+(starting with a compact representation
+of the canonical list of lengths),
+recover the uncompressed text.
+*/
 void decompress(){
     // FIXME:
+    assert(0);
 }
 
 void
 next_block(void){
+    printf("# Starting next block...\n");
     // FIXME: use a larger buffer,
     // perhaps with malloc() or realloc() or both?
     const size_t bufsize = 65000;
@@ -534,6 +581,9 @@ next_block(void){
     size_t original_length = strlen( original_text );
     // FIXME: doesn't yet support reading '\0' bytes
     assert( original_length == used );
+
+
+
     // FIXME: support arbitrary number of symbols.
     /*
     const int text_symbols = 258;
@@ -569,8 +619,30 @@ next_block(void){
     }
 }
 
+void test_setup_nodes(){
+    printf("# starting test_setup_nodes():\n");
+#define    max_leaf_value_doubled (600)
+    const int list_length = max_leaf_value_doubled;
+    struct node list[max_leaf_value_doubled];
+    int sorted_index[max_leaf_value_doubled];
+
+#define max_symbol_value (300)
+    int symbol_frequencies[max_symbol_value] = {0};
+    symbol_frequencies['a'] = 10;
+    symbol_frequencies['c'] = 9;
+
+    setup_nodes(
+        list_length, list,
+        sorted_index,
+        max_symbol_value,
+        symbol_frequencies
+    );
+    printf("# Done test_setup_nodes():\n");
+}
+
 void run_tests(void){
     test_summarize_tree_with_lengths();
+    test_setup_nodes();
 }
 
 int main(void){
