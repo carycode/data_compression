@@ -77,6 +77,8 @@ by other programs downstream in the pipeline.
 
 FUTURE: length-limited Huffman?
 
+FUTURE: use size_t rather than int for array lengths?
+
 */
 
 #include <stdio.h>
@@ -101,7 +103,7 @@ void
 histogram(
     const char * text,
     const int max_symbol_value,
-    int h[max_symbol_value] // output-only
+    int h[max_symbol_value+1] // output-only
 ){
     /*
     I wish
@@ -110,7 +112,7 @@ histogram(
     but instead the compiler tells me
     "error: variable-sized object may not be initialized".
     */
-    for(int i=0; i<max_symbol_value; i++){
+    for(int i=0; i<(max_symbol_value+1); i++){
         h[i] = 0;
     };
     const unsigned char * c = (const unsigned char *) text;
@@ -121,10 +123,14 @@ histogram(
     while( *c ){
         assert( 0 < *c );
         assert( *c <= max_symbol_value );
+        if( 126 < *c ){
+            printf("# value above 126 near %s\n", c - 20);
+        };
         h[*c]++;
         c++;
     };
     // return h;
+    assert( 0 == h[258] );
 }
 
 /* should I use
@@ -166,7 +172,7 @@ debug_print_node(struct node n, int index){
 void
 debug_print_node_list(
     const int list_length,
-    struct node list[list_length]
+    const struct node list[list_length]
 ){
     for(int i=0; i<list_length; i++){
         bool nonzero = (0 != list[i].count);
@@ -210,24 +216,97 @@ the end that requires the least shuffling of other nodes.
 */
 static
 void
+print_counts(
+    const int list_length,
+    const int sorted_index[list_length],
+    const struct node list[list_length],
+    const int min_active_node,
+    const int max_node
+){
+    for(int i=min_active_node; i<(max_node+1); i++){
+        int count_one = list[ sorted_index[ i ] ].count;
+        printf("# %i\n", count_one);
+    };
+}
+static
+bool
+swap_if_necessary(
+    const int list_length,
+    int sorted_index[list_length], // modified
+    struct node list[list_length], // input-only
+    const int left,
+    const int right
+){
+    int count_one = list[ sorted_index[ left  ] ].count;
+    int count_two = list[ sorted_index[ right ] ].count;
+    if( count_two < count_one ){
+        int c = sorted_index[ left ];
+        int d = sorted_index[ right ];
+        sorted_index[ left ] = d;
+        sorted_index[ right ] = c;
+        return true;
+    };
+    return false;
+}
+static
+void
 partial_sort(
     const int list_length,
-    int sorted_index[list_length],
-    struct node list[list_length],
-    const int min_active_node
+    int sorted_index[list_length], // modified
+    struct node list[list_length], // input-only
+    const int min_active_node,
+    const int max_node
 ){
+    // shuffle the indexes in the sorted_index[]
+    // so that, for example,
+    // when 3=compressed_symbols,
+    // the 3 counts
+    //  list[sorted_index[min_active_node].count
+    //  list[sorted_index[min_active_node+1].count
+    //  list[sorted_index[min_active_node+2].count
+    // are the *smallest* counts in the whole range.
     // FIXME:
+    /*
+    print_counts(
+        list_length,
+        sorted_index,
+        list,
+        min_active_node,
+        max_node
+    );
+    */
+    printf("# sorting %i items...\n", max_node - min_active_node + 1);
     assert( min_active_node < list_length );
-    int a = list_length - 2;
-    int b = list_length - 1;
-    int count_one = list[ sorted_index[ a ] ].count;
-    int count_two = list[ sorted_index[ b ] ].count;
-    if( count_two < count_one ){
-        int c = sorted_index[ a ];
-        int d = sorted_index[ b ];
-        sorted_index[ a ] = d;
-        sorted_index[ b ] = c;
-    };
+    assert( min_active_node < max_node );
+    int total_swapped = 0;
+    do{
+        total_swapped = 0;
+        for(int i=(max_node-1); i>=(min_active_node); i--){
+            bool swapped = swap_if_necessary(
+                list_length,
+                sorted_index,
+                list,
+                i,
+                i+1
+            );
+            total_swapped += swapped;
+        };
+        /*
+        if(total_swapped){
+            printf("# found %i out-of-order; rescanning...",
+                total_swapped
+            );
+        };
+        */
+    }while(total_swapped);
+    print_counts(
+        list_length,
+        sorted_index,
+        list,
+        min_active_node,
+        max_node
+    );
+    printf("# ... sorted.\n");
 }
 
 /*
@@ -272,24 +351,28 @@ setup_nodes(
     const int list_length,
     struct node list[list_length],
     // int sorted_index[list_length],
-    const int max_leaves,
-    const int * symbol_frequencies // [max_leaves],
+    const int max_leaf_value,
+    const int symbol_frequencies[max_leaf_value+1]
 ){
     printf("# starting setup_nodes.\n");
+    printf("# list_length:%i\n", list_length);
+    printf("# max_leaf_value:%i\n", max_leaf_value );
     // initialize the leaf nodes
     // (typically including the 256 possible literal byte values)
-    assert( max_leaves < list_length );
-    for( int i=0; i<max_leaves; i++){
+    assert( 0 == symbol_frequencies[258] );
+    assert( (max_leaf_value+1) < list_length );
+    for( int i=0; i<(max_leaf_value+1); i++){
         list[i].leaf = true;
         list[i].leaf_value = i;
         list[i].count = symbol_frequencies[i];
+        assert( 0 <= symbol_frequencies[i] );
         // sorted_index[i] = i;
         list[i].parent_index = 0; // will be filled in later
         // zero out stuff that only applies to non-leaves
         list[i].left_index = 0;
         list[i].right_index = 0;
     };
-    for( int i=max_leaves; i<list_length; i++){
+    for( int i=max_leaf_value+1; i<list_length; i++){
         list[i].leaf = false;
         // sorted_index[i] = 0;
         list[i].left_index = 0; // will be filled in later
@@ -300,6 +383,11 @@ setup_nodes(
         list[i].leaf_value = 0;
     };
     printf("# Done setup_nodes.\n");
+    assert( true == list[max_leaf_value].leaf );
+    assert( false == list[max_leaf_value+1].leaf );
+    assert(0 == list[259].count );
+    debug_print_node_list(list_length, list);
+    assert( 0 == list[258].count );
 }
 
 void
@@ -307,10 +395,11 @@ generate_huffman_tree(
     // const int text_symbols,
     const int list_length,
     struct node list[list_length], // in-out: updated
-    // int sorted_index[list_length], // in-out: updated
     const int compressed_symbols,
     const int max_leaf_value
 ){
+    assert( 0 == list[258].count );
+    assert(0 == list[259].count );
     // count out zero-frequency symbols
     int nonzero_text_symbols = 0;
     for( int i=0; i<(max_leaf_value+1); i++ ){
@@ -329,7 +418,7 @@ generate_huffman_tree(
         sorted_index[i] = i;
     };
     for( int i=(max_leaf_value+1); i<list_length; i++){
-        sorted_index[i] = 0;
+        sorted_index[i] = i;
     };
 
     int dummy_nodes = (nonzero_text_symbols - 1) % (compressed_symbols - 1);
@@ -345,28 +434,85 @@ generate_huffman_tree(
     };
     assert( dummy_nodes < (compressed_symbols - 1) );
     printf("# using %i dummy nodes.\n", dummy_nodes);
+    printf("# max_leaf_value: %i\n", max_leaf_value);
     for(int i=(max_leaf_value+1); i<(max_leaf_value + 1 + dummy_nodes); i++){
         sorted_index[i] = i;
         list[i].count = 1; // minimum count for dummy nodes.
     };
+    assert(1 == list[259].count ); // dummy node
+    // ZQ
 
     int min_active_node = 0;
-    int n = max_leaf_value + 1 + dummy_nodes;
+    // when leaves are "merged" together to some internal node,
+    // list[n] will be that internal node.
+    int max_active_node = max_leaf_value + dummy_nodes;
+    assert( 0 == list[258].count );
+    /*
     debug_print_node_list(list_length, list);
-    while( min_active_node < n ){
+    */
+    // squeeze out zero values
+    do{
+        printf("# squeezing out zero counts.\n");
+        while( 0 == list[sorted_index[min_active_node]].count ){
+            min_active_node++;
+        };
+        partial_sort(
+            list_length, sorted_index, list,
+            min_active_node,
+            max_active_node
+        );
+    }while( 0 == list[sorted_index[min_active_node]].count );
+    // check that there are no zero values
+    for(int i=min_active_node; i<(max_active_node+1); i++){
+        assert( 0 != list[sorted_index[i]].count );
+    };
+    printf("# No more zero counts.\n");
+    /*
+    debug_print_node_list(list_length, list);
+    */
+    while( min_active_node < max_active_node ){
+        const int n = max_active_node+1;
+        printf("# n=%i\n", n);
+        assert(0 == list[n].count);
+        assert( n < list_length );
         // find the lowest-frequency (other than 0) nodes,
         // merge together to produce a non-leaf internal node.
         // Repeat until only one node.
-        partial_sort( list_length, sorted_index, list, min_active_node );
-        n++;
+        partial_sort(
+            list_length, sorted_index, list,
+            min_active_node,
+            max_active_node
+        );
         
         assert( false == list[n].leaf );
-        list[n].left_index = min_active_node;
-        list[n].right_index = min_active_node+1;
-        list[sorted_index[min_active_node]].parent_index = n;
-        list[sorted_index[min_active_node+1]].parent_index = n;
+        if(1){ // not really used.
+            list[n].left_index = sorted_index[min_active_node];
+            list[n].right_index = sorted_index[min_active_node+1];
+        };
+        int parent_count = 0;
+        for(int i=0; i<compressed_symbols; i++){
+            int child_i = sorted_index[min_active_node];
+            if( 0 == list[child_i].count ){
+                /*
+                debug_print_node_list(list_length, list);
+                */
+                for(int j=min_active_node; j<=max_active_node; j++){
+                    printf("# odd: %i, %i\n", list[sorted_index[j]].count, sorted_index[j]);
+                };
+            };
+            assert( 0 != list[child_i].count );
+            list[child_i].parent_index = n;
+            parent_count += list[child_i].count;
+            min_active_node++;
+        };
+        list[n].count = parent_count;
+        assert(0 != list[n].count);
+        assert( n == sorted_index[n]);
+        max_active_node++;
+        assert( n == max_active_node );
     };
-    assert( min_active_node == n );
+    printf("# finished tree.\n");
+    assert( min_active_node == max_active_node );
 }
 
 /*
@@ -400,6 +546,9 @@ summarize_tree_with_lengths(
     int lengths[max_leaf_value+1], // output-only
     const int leaves
 ){
+    /*
+    debug_print_node_list(list_length, list);
+    */
     // zero out the lengths
     for( int i=0; i<(max_leaf_value+1); i++){
         lengths[i] = 0;
@@ -420,7 +569,7 @@ summarize_tree_with_lengths(
         if(!isprint(c)){
             c = 0;
         };
-        printf( "# { %i, ... '%c'...}\n", list[i].leaf, c );
+        printf( "# %i { %i, ... '%c'...}\n", i, list[i].leaf, c );
         // FIXME: ... end replace.
 
         assert( true == list[i].leaf );
@@ -517,7 +666,7 @@ huffman(
     const int compressed_symbols,
     int lengths[max_leaf_value+1]
 ){
-    const int max_leaf_value_doubled = (2*max_leaf_value);
+    const int list_length = (2*max_leaf_value);
     /*
     I wish
     node list[text_symbols] = {0}; // list of both leaf and internal nodes
@@ -526,21 +675,24 @@ huffman(
     but instead the compiler tells me
     "error: variable-sized object may not be initialized".
     */
-    struct node list[max_leaf_value_doubled];
+    struct node list[list_length];
     // int sorted_index[max_leaf_value_doubled];
 
-    const int list_length = max_leaf_value_doubled;
     setup_nodes(
         list_length, list,
         // sorted_index,
         max_leaf_value,
         symbol_frequencies
     );
+    assert(0 == list[259].count );
+    /*
     printf("# after initial setup_nodes: \n");
     debug_print_node_list(
         list_length, list
     );
+    */
 
+    assert( 0 == list[258].count );
     generate_huffman_tree(
         list_length,
         list,
@@ -549,7 +701,7 @@ huffman(
         max_leaf_value
     );
 
-    summarize_tree_with_lengths( max_leaf_value_doubled, list, max_leaf_value, lengths, max_leaf_value );
+    summarize_tree_with_lengths( list_length, list, max_leaf_value, lengths, max_leaf_value+1 );
 }
 
 /*
@@ -606,12 +758,14 @@ size_t
 load_more_text(FILE * in, const size_t bufsize, char * buffer){
     if( ferror(in) ){
         // read error already occurred?
+        printf("# previous read error?\n");
         return -1;
     };
     size_t ret_code = fread( buffer, 1, bufsize, in);
     if( bufsize == ret_code ){
         // read all bufsize characters successfully;
         // there's probably more characters later.
+        printf("# successful full-buffer read\n");
         // Append a zero
         // to convert this to a valid C string.
         buffer[ret_code] = '\0';
@@ -621,6 +775,7 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
     // else did *not* read a full bufsize characters.
     if( feof(in) ){
         // hit end of file.
+        printf("# successful part-buffer read (end-of-file)\n");
         // Append a zero
         // to convert this to a valid C string.
         buffer[ret_code] = '\0';
@@ -628,6 +783,7 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
 
     }else if( ferror(in) ){
         // some kind of read error.
+        printf("# new read error?\n");
         return -1;
     };
     assert( 0 /* "This should never happen." */ );
@@ -737,9 +893,10 @@ next_block(void){
     const int text_symbols = 258;
     */
     const int max_symbol_value = 258;
-    int symbol_frequencies[max_symbol_value];
+    int symbol_frequencies[max_symbol_value+1];
     printf("# finding histogram.\n");
     histogram( original_text, max_symbol_value, symbol_frequencies );
+    assert( 0 == symbol_frequencies[258] );
     int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
     // FUTURE: length-limited Huffman?
 
@@ -802,8 +959,11 @@ void test_setup_nodes(){
 }
 
 void run_tests(void){
+    /*
     test_summarize_tree_with_lengths();
     test_setup_nodes();
+    */
+    next_block();
 }
 
 int main(void){
