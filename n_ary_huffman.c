@@ -85,6 +85,7 @@ FUTURE: length-limited Huffman?
 #include <iso646.h> // for bitand, bitor, not, xor, etc.
 #include <assert.h> // for assert()
 #include <ctype.h> // for isprint()
+#include <limits.h> // for INT_MAX
 
 #define COMPILE_TIME_ASSERT(pred) switch(0){case 0:case pred:;}
 
@@ -100,7 +101,7 @@ void
 histogram(
     const char * text,
     const int max_symbol_value,
-    int * h // output-only
+    int h[max_symbol_value] // output-only
 ){
     /*
     I wish
@@ -207,10 +208,12 @@ at the "best" end --
 the end that requires the least shuffling of other nodes.
 * Rather than a linear list, perhaps a priority heap?
 */
-void partial_sort(
+static
+void
+partial_sort(
     const int list_length,
-    int * sorted_index,
-    struct node * list,
+    int sorted_index[list_length],
+    struct node list[list_length],
     const int min_active_node
 ){
     // FIXME:
@@ -510,9 +513,9 @@ using the Huffman algorithm.
 void
 huffman(
     const int max_leaf_value,
-    const int * symbol_frequencies, // [max_symbol_value]
+    const int symbol_frequencies[max_leaf_value+1],
     const int compressed_symbols,
-    int * lengths // [max_symbol_value]
+    int lengths[max_leaf_value+1]
 ){
     const int max_leaf_value_doubled = (2*max_leaf_value);
     /*
@@ -534,7 +537,7 @@ huffman(
         symbol_frequencies
     );
     printf("# after initial setup_nodes: \n");
-    debug_print_node_list( 
+    debug_print_node_list(
         list_length, list
     );
 
@@ -655,6 +658,66 @@ void decompress(){
     assert(0);
 }
 
+// apparently not yet in standard libraries
+static int
+imax( int a, int b ){
+    return ((a<b)? b : a);
+}
+static int
+imin( int a, int b){
+    return ((a<b)? a : b);
+}
+
+int
+test_various_table_representations(
+        int max_symbol_value,
+        int symbol_frequency[max_symbol_value],
+        int canonical_length[max_symbol_value]
+){
+
+    int uncompressed_length=0;
+    int standard_huffman_length=0;
+    int longest_symbol=0;
+    int shortest_nonzero_symbol=INT_MAX;
+    for(int i=0; i<(max_symbol_value+1); i++){
+        int lb = canonical_length[i];
+        uncompressed_length = symbol_frequency[i]*8;
+        standard_huffman_length += symbol_frequency[i]*lb;
+        longest_symbol = imax(longest_symbol, lb);
+        if(lb){
+            shortest_nonzero_symbol = imin(shortest_nonzero_symbol, lb);
+        };
+    };
+    printf("# %i bits: longest symbol\n", longest_symbol );
+    printf("# %i bits: uncompressed length\n", uncompressed_length );
+    if( longest_symbol < 16 ){
+        printf("# %i = %i + %i: table of 256 nybbles + huffman length\n",
+            256*4 + standard_huffman_length,
+            256*4, standard_huffman_length
+        );
+        // FIXME: length-limited huffman
+        /*
+        printf("# %i = %i + %i bits: only 16 most-common symbols in table",
+            ??? + limited_length_huffman
+            ???, limited_length_huffman
+        );
+        */
+        // FIXME: only 16 most-common symbols
+        // The table contains 12 bits per symbol,
+        // the literal value of the symbol + 4 bits of length,
+        // perhaps packed as <symbol><symbol><length length>.
+        /*
+        printf("# %i = %i + %i bits: only 16 most-common symbols in table",
+            16*12 + common_length_huffman
+            16*12, common_length_huffman
+        );
+        */
+    }else{
+        printf("################### unexpectedly long symbol !!!!!");
+    };
+    return 0;
+}
+
 void
 next_block(void){
     printf("# Starting next block...\n");
@@ -695,6 +758,11 @@ next_block(void){
         canonical_lengths
     );
     debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
+    test_various_table_representations(
+        max_symbol_value,
+        symbol_frequencies,
+        canonical_lengths
+    );
     printf("# compressing text.");
     char compressed_text[bufsize+1];
     compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
