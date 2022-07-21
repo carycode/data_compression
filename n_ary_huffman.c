@@ -388,6 +388,7 @@ setup_nodes(
     assert(0 == list[259].count );
     debug_print_node_list(list_length, list);
     assert( 0 == list[258].count );
+    assert( 0 == list[300].count );
 }
 
 void
@@ -940,7 +941,7 @@ void test_setup_nodes(){
     // int sorted_index[max_leaf_value_doubled];
 
 #define max_symbol_value (300)
-    int symbol_frequencies[max_symbol_value] = {0};
+    int symbol_frequencies[max_symbol_value+1] = {0};
     symbol_frequencies['a'] = 10;
     symbol_frequencies['c'] = 9;
 
@@ -951,9 +952,93 @@ void test_setup_nodes(){
         symbol_frequencies
     );
     printf("# Done test_setup_nodes():\n");
+#undef max_leaf_value_doubled
+#undef max_symbol_value
 }
 
+void
+test_next_block(void){
+    printf("# Starting next block...\n");
+    // FIXME: use a larger buffer,
+    // perhaps with malloc() or realloc() or both?
+    const size_t bufsize = 65000;
+    char original_text[65000+1] =
+        ""
+"/* n_ary_huffman.c"
+"WARNING: version  2021.00.01-alpha : extremely rough draft."
+"2021-10-25: started by David Cary"
+""
+"A few experiments with"
+"n-ary Huffman compression."
+""
+"Many Huffman data compression algorithms"
+"2 output symbols (binary)"
+"and"
+"around 257 input symbols."
+"(Often"
+"256 symbols: all possible bytes"
+"DEFLATE has 288 symbols in its main Huffman tree:"
+"0..255: all possible literal bytes 0-255"
+"256: end-of-block symbol"
+"257-285: match lengths"
+"286, 287: not used, reserved and illegal."
+"DEFLATE has 32 symbols in its 'distance' tree."
+")Z"
+"*/"
+        "";
+    size_t original_length = strlen( original_text );
+
+    // FIXME: support arbitrary number of symbols.
+    const int max_symbol_value = 258;
+    int symbol_frequencies[max_symbol_value+1];
+    printf("# finding histogram.\n");
+    histogram( original_text, max_symbol_value, symbol_frequencies );
+    assert( 0 == symbol_frequencies[258] );
+    int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
+    // FUTURE: length-limited Huffman?
+
+    /*
+    int canonical_lengths[text_symbols];
+    */
+    printf("# finding canonical lengths.\n");
+    int canonical_lengths[max_symbol_value+1];
+    for( int i=0; i<(max_symbol_value+1); i++){
+        canonical_lengths[i] = 0;
+    };
+    // int canonical_lengths[nonzero_text_symbols] = {};
+    huffman(
+        max_symbol_value, symbol_frequencies,
+        compressed_symbols,
+        canonical_lengths
+    );
+    printf("# now we have the canonical lengths ...\n");
+    debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
+    test_various_table_representations(
+        max_symbol_value,
+        symbol_frequencies,
+        canonical_lengths
+    );
+    printf("# compressing text.");
+    char compressed_text[bufsize+1];
+    compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
+    printf("# decompressing text.");
+    char decompressed_text[bufsize+1];
+    decompress( compressed_text, decompressed_text );
+    size_t decompressed_length = strlen( decompressed_text );
+    assert( original_length == decompressed_length );
+    if( memcmp( original_text, decompressed_text, original_length ) ){
+        printf("Error: decompressed text doesn't match original text.\n");
+        printf("[%s] original\n", original_text);
+        printf("[%s] decompressed\n", decompressed_text);
+    }else{
+        printf("Successful test.\n");
+    }
+}
+
+
 void run_tests(void){
+    test_next_block();
+
     /*
     test_summarize_tree_with_lengths();
     test_setup_nodes();
