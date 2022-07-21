@@ -564,13 +564,7 @@ summarize_tree_with_lengths(
     assert( list_length > leaves );
     assert( false == list[leaves].leaf );
     for( int i=0; i<leaves; i++){
-        // FIXME: replace with debug_print_node( list[i] );
-        char c = list[i].leaf_value;
-        if(!isprint(c)){
-            c = 0;
-        };
-        printf( "# %i { %i, ... '%c'...}\n", i, list[i].leaf, c );
-        // FIXME: ... end replace.
+        debug_print_node( list[i], i );
 
         assert( true == list[i].leaf );
         if( list[i].count ){
@@ -591,6 +585,7 @@ summarize_tree_with_lengths(
         int leaf_value = list[i].leaf_value;
         lengths[leaf_value] = sum;
     };
+    printf("# finished summary.\n");
 }
 
 void
@@ -701,7 +696,9 @@ huffman(
         max_leaf_value
     );
 
+    printf("# summarizing tree...\n");
     summarize_tree_with_lengths( list_length, list, max_leaf_value, lengths, max_leaf_value+1 );
+    printf("# discarding tree, keeping only lengths.\n");
 }
 
 /*
@@ -889,9 +886,6 @@ next_block(void){
 
 
     // FIXME: support arbitrary number of symbols.
-    /*
-    const int text_symbols = 258;
-    */
     const int max_symbol_value = 258;
     int symbol_frequencies[max_symbol_value+1];
     printf("# finding histogram.\n");
@@ -904,8 +898,8 @@ next_block(void){
     int canonical_lengths[text_symbols];
     */
     printf("# finding canonical lengths.\n");
-    int canonical_lengths[max_symbol_value];
-    for( int i=0; i<max_symbol_value; i++){
+    int canonical_lengths[max_symbol_value+1];
+    for( int i=0; i<(max_symbol_value+1); i++){
         canonical_lengths[i] = 0;
     };
     // int canonical_lengths[nonzero_text_symbols] = {};
@@ -914,6 +908,7 @@ next_block(void){
         compressed_symbols,
         canonical_lengths
     );
+    printf("# now we have the canonical lengths ...\n");
     debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
     test_various_table_representations(
         max_symbol_value,
