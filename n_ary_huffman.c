@@ -99,8 +99,8 @@ https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
 void
 histogram(
     const char * text,
-    const int text_symbols,
-    int h[text_symbols] // output-only
+    const int max_symbol_value,
+    int * h // output-only
 ){
     /*
     I wish
@@ -109,8 +109,8 @@ histogram(
     but instead the compiler tells me
     "error: variable-sized object may not be initialized".
     */
-    for(int i=0; i<text_symbols; i++){
-        h[text_symbols] = 0;
+    for(int i=0; i<max_symbol_value; i++){
+        h[i] = 0;
     };
     const unsigned char * c = (const unsigned char *) text;
     /*
@@ -118,6 +118,8 @@ histogram(
     in the text block.
     */
     while( *c ){
+        assert( 0 < *c );
+        assert( *c <= max_symbol_value );
         h[*c]++;
         c++;
     };
@@ -148,6 +150,31 @@ struct node{
     // just to indicate that it isn't known yet.
     // int length; // only for debugging: FIXME: remove.
 };
+
+void
+debug_print_node(struct node n, int index){
+    char c = n.leaf_value;
+    if(!isprint(c)){
+        c = 0;
+    };
+    printf("# %i { %i, count:%i, ... '%c', parent:%i }\n",
+        index, n.leaf, n.count, c, n.parent_index
+        );
+}
+
+void
+debug_print_node_list(
+    const int list_length,
+    struct node list[list_length]
+){
+    for(int i=0; i<list_length; i++){
+        bool nonzero = (0 != list[i].count);
+        bool nonleaf = !(list[i].leaf);
+        if(nonzero or nonleaf){
+            debug_print_node( list[i], i );
+        };
+    };
+}
 
 /*
 it wouldn't hurt to completely sort,
@@ -283,7 +310,7 @@ generate_huffman_tree(
 ){
     // count out zero-frequency symbols
     int nonzero_text_symbols = 0;
-    for( int i=0; i<max_leaf_value; i++ ){
+    for( int i=0; i<(max_leaf_value+1); i++ ){
         // if( 0 != list[ sorted_index[ i ] ].count ){
         if( 0 != list[ i ].count ){
             nonzero_text_symbols++ ;
@@ -295,13 +322,12 @@ generate_huffman_tree(
     // setup internal sorted_index
     int sorted_index[list_length];
     assert( max_leaf_value < list_length );
-    for( int i=0; i<max_leaf_value; i++){
+    for( int i=0; i<(max_leaf_value+1); i++){
         sorted_index[i] = i;
     };
-    for( int i=max_leaf_value; i<list_length; i++){
+    for( int i=(max_leaf_value+1); i<list_length; i++){
         sorted_index[i] = 0;
     };
-
 
     int dummy_nodes = (nonzero_text_symbols - 1) % (compressed_symbols - 1);
     
@@ -316,25 +342,28 @@ generate_huffman_tree(
     };
     assert( dummy_nodes < (compressed_symbols - 1) );
     printf("# using %i dummy nodes.\n", dummy_nodes);
-    for(int i=max_leaf_value; i<(max_leaf_value + dummy_nodes); i++){
+    for(int i=(max_leaf_value+1); i<(max_leaf_value + 1 + dummy_nodes); i++){
         sorted_index[i] = i;
         list[i].count = 1; // minimum count for dummy nodes.
     };
 
     int min_active_node = 0;
-    int n = max_leaf_value + dummy_nodes;
-    while( min_active_node < max_leaf_value ){
+    int n = max_leaf_value + 1 + dummy_nodes;
+    debug_print_node_list(list_length, list);
+    while( min_active_node < n ){
         // find the lowest-frequency (other than 0) nodes,
         // merge together to produce a non-leaf internal node.
         // Repeat until only one node.
         partial_sort( list_length, sorted_index, list, min_active_node );
         n++;
+        
         assert( false == list[n].leaf );
         list[n].left_index = min_active_node;
         list[n].right_index = min_active_node+1;
         list[sorted_index[min_active_node]].parent_index = n;
         list[sorted_index[min_active_node+1]].parent_index = n;
     };
+    assert( min_active_node == n );
 }
 
 /*
@@ -379,15 +408,18 @@ summarize_tree_with_lengths(
     // should immediately follow.
     // There may be a few dummy unused nodes (0 == list[x].count)
     // at the end of the list[].
-    printf( "leaves: %i\n", leaves);
+    printf( "# leaves: %i\n", leaves);
     assert( list_length > leaves );
     assert( false == list[leaves].leaf );
     for( int i=0; i<leaves; i++){
+        // FIXME: replace with debug_print_node( list[i] );
         char c = list[i].leaf_value;
         if(!isprint(c)){
             c = 0;
         };
-        printf( "{ %i, ... '%c'...}\n", list[i].leaf, c );
+        printf( "# { %i, ... '%c'...}\n", list[i].leaf, c );
+        // FIXME: ... end replace.
+
         assert( true == list[i].leaf );
         if( list[i].count ){
             assert( list[i].parent_index );
@@ -412,13 +444,13 @@ summarize_tree_with_lengths(
 void
 debug_print_table( int text_symbols, int canonical_lengths[text_symbols], int compressed_symbols ){
     // FIXME:
-    printf( "compressed_symbols: %i \n", compressed_symbols );
-    printf( "(2 === compressed symbols is the common binary case)\n" );
-    printf( "(3 === compressed symbols for trinary)\n" );
-    printf( "text_symbols: %i \n", text_symbols );
-    printf( "(typically text_symbols around 300, one for each byte and a few other special ones, even if most of those byte values never actually occur in the text) \n" );
+    printf( "# compressed_symbols: %i \n", compressed_symbols );
+    printf( "# (2 === compressed symbols is the common binary case)\n" );
+    printf( "# (3 === compressed symbols for trinary)\n" );
+    printf( "# text_symbols: %i \n", text_symbols );
+    printf( "# (typically text_symbols around 300, one for each byte and a few other special ones, even if most of those byte values never actually occur in the text) \n" );
     for( int i=0; i<text_symbols; i++ ){
-        printf("symbol %i : length %i ", i, canonical_lengths[i] );
+        printf("# symbol %i : length %i ", i, canonical_lengths[i] );
         if( isprint( i ) ){
             printf("(%c)", (char)i );
         };
@@ -480,9 +512,9 @@ huffman(
     const int max_leaf_value,
     const int * symbol_frequencies, // [max_symbol_value]
     const int compressed_symbols,
-    int *  lengths, // [max_symbol_value],
-    const int max_leaf_value_doubled
+    int * lengths // [max_symbol_value]
 ){
+    const int max_leaf_value_doubled = (2*max_leaf_value);
     /*
     I wish
     node list[text_symbols] = {0}; // list of both leaf and internal nodes
@@ -500,6 +532,10 @@ huffman(
         // sorted_index,
         max_leaf_value,
         symbol_frequencies
+    );
+    printf("# after initial setup_nodes: \n");
+    debug_print_node_list( 
+        list_length, list
     );
 
     generate_huffman_tree(
@@ -653,7 +689,11 @@ next_block(void){
         canonical_lengths[i] = 0;
     };
     // int canonical_lengths[nonzero_text_symbols] = {};
-    huffman( max_symbol_value, symbol_frequencies, compressed_symbols, canonical_lengths, (2*max_symbol_value) );
+    huffman(
+        max_symbol_value, symbol_frequencies,
+        compressed_symbols,
+        canonical_lengths
+    );
     debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
     printf("# compressing text.");
     char compressed_text[bufsize+1];
