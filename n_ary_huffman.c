@@ -986,7 +986,9 @@ test_next_block(void){
 ")Z"
 "*/"
         "";
+    /*
     size_t original_length = strlen( original_text );
+    */
 
     // FIXME: support arbitrary number of symbols.
     const int max_symbol_value = 258;
@@ -1021,6 +1023,7 @@ test_next_block(void){
     printf("# compressing text.");
     char compressed_text[bufsize+1];
     compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
+    /*
     printf("# decompressing text.");
     char decompressed_text[bufsize+1];
     decompress( compressed_text, decompressed_text );
@@ -1033,6 +1036,7 @@ test_next_block(void){
     }else{
         printf("Successful test.\n");
     }
+    */
 }
 
 
@@ -1042,13 +1046,13 @@ void run_tests(void){
     /*
     test_summarize_tree_with_lengths();
     test_setup_nodes();
-    */
     next_block();
+    */
 }
 
 int main(void){
     run_tests();
-    next_block();
+    // next_block();
     return 0;
 }
 
