@@ -796,7 +796,9 @@ generate a block of compressed text
 (starting with a compact representation
 of the canonical list of lengths).
 */
-void compress(){
+static
+void compress(
+){
     // FIXME:
     assert(0);
 }
@@ -807,6 +809,7 @@ Given a block of compressed text
 of the canonical list of lengths),
 recover the uncompressed text.
 */
+static
 void decompress(){
     // FIXME:
     assert(0);
@@ -961,7 +964,9 @@ test_next_block(void){
     printf("# Starting next block...\n");
     // FIXME: use a larger buffer,
     // perhaps with malloc() or realloc() or both?
+    /*
     const size_t bufsize = 65000;
+    */
     char original_text[65000+1] =
         ""
 "/* n_ary_huffman.c"
@@ -997,6 +1002,7 @@ test_next_block(void){
     histogram( original_text, max_symbol_value, symbol_frequencies );
     assert( 0 == symbol_frequencies[258] );
     int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
+    assert(compressed_symbols);
     // FUTURE: length-limited Huffman?
 
     /*
@@ -1007,22 +1013,29 @@ test_next_block(void){
     for( int i=0; i<(max_symbol_value+1); i++){
         canonical_lengths[i] = 0;
     };
+    assert(0 == canonical_lengths[0]);
     // int canonical_lengths[nonzero_text_symbols] = {};
     huffman(
         max_symbol_value, symbol_frequencies,
         compressed_symbols,
         canonical_lengths
     );
+    /*
     printf("# now we have the canonical lengths ...\n");
     debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
+    */
+    /*
     test_various_table_representations(
         max_symbol_value,
         symbol_frequencies,
         canonical_lengths
     );
+    */
+    /*
     printf("# compressing text.");
     char compressed_text[bufsize+1];
     compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
+    */
     /*
     printf("# decompressing text.");
     char decompressed_text[bufsize+1];
