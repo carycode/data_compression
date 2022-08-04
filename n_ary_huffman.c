@@ -145,7 +145,7 @@ struct node{
     int left_index;
     int right_index;
     // only if leaf=true, i.e., this node is a leaf:
-    char leaf_value;
+    int leaf_value;
     // FUTURE: make this a union?
     // FIXME: int depth; // only used for length-limited Huffman
     int parent_index; // for trinary, decimal, etc. trees ?
@@ -174,6 +174,7 @@ debug_print_node_list(
     const int list_length,
     const struct node list[list_length]
 ){
+    printf("# list_length: %i\n", list_length);
     for(int i=0; i<list_length; i++){
         bool nonzero = (0 != list[i].count);
         bool nonleaf = !(list[i].leaf);
@@ -364,6 +365,7 @@ setup_nodes(
     for( int i=0; i<(max_leaf_value+1); i++){
         list[i].leaf = true;
         list[i].leaf_value = i;
+        assert( 0 <= list[i].leaf_value );
         list[i].count = symbol_frequencies[i];
         assert( 0 <= symbol_frequencies[i] );
         // sorted_index[i] = i;
@@ -583,7 +585,18 @@ summarize_tree_with_lengths(
         }while( 0 != child );
         sum--; // don't count root node.
         // lengths[i] = sum;
+        /*
+        Originally "list[i].leaf_value" was a "char".
+        On systems where "char" is a *signed* integer,
+        this can set "leaf_value" to a *negative* number,
+        then "lengths[leaf_value] = sum;"
+        overwrites stuff it shouldn't.
+        Then running this program gave the message
+        "*** stack smashing detected ***: terminated"
+        */
         int leaf_value = list[i].leaf_value;
+        assert( 0 <= leaf_value );
+        assert( leaf_value <= max_leaf_value );
         lengths[leaf_value] = sum;
     };
     printf("# finished summary.\n");
@@ -663,6 +676,7 @@ huffman(
     int lengths[max_leaf_value+1]
 ){
     const int list_length = (2*max_leaf_value);
+    assert(1 < compressed_symbols);
     /*
     I wish
     node list[text_symbols] = {0}; // list of both leaf and internal nodes
@@ -698,6 +712,7 @@ huffman(
     );
 
     printf("# summarizing tree...\n");
+    printf("# max_leaf_value: %i\n", max_leaf_value);
     summarize_tree_with_lengths( list_length, list, max_leaf_value, lengths, max_leaf_value+1 );
     printf("# discarding tree, keeping only lengths.\n");
 }
@@ -1052,15 +1067,10 @@ test_next_block(void){
     */
 }
 
-
 void run_tests(void){
-    test_next_block();
-
-    /*
     test_summarize_tree_with_lengths();
     test_setup_nodes();
     next_block();
-    */
 }
 
 int main(void){
