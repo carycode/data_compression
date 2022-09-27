@@ -79,6 +79,82 @@ FUTURE: length-limited Huffman?
 
 FUTURE: use size_t rather than int for array lengths?
 
+FUTURE:
+perhaps break up this monolithic file
+into 2 or more separate files:
+* decompression-only library
+* compression-only library
+* usage example, which also stress-tests those libraries
+
+
+Currently this implementation
+never uses dynamic allocation.
+So we never have to worry about
+garbage collection / memory fragmentation
+memory leakage / etc.
+If you do use dynamic allocation in the future,
+consider continuing to avoid malloc()
+and instead using things like calloc()
+which ensure the new memory block is initialized.
+
+FUTURE:
+pick a version numbering system:
+perhaps initially the light-hearted ZeroVer (0ver)
+ZeroVer
+https://sedimental.org/open_source_projects.html#zerover
+https://0ver.org/
+then later look at
+I suspect I'll end up with
+the slightly more serious
+CalVer
+https://sedimental.org/calver.html
+https://sedimental.org/open_source_projects.html#calver-calendar-versioning
+recommended by
+"Designing a version"
+https://sedimental.org/designing_a_version.html
+
+DAV:
+I expect to end up with *two* version numbers
+associated with this software:
+(1) The most important: a version number
+in the header of the output file / stream
+that helps recievers know (a) if
+this distant-future stored-data format
+has breaking changes and cannot be decoded
+with this version of the reciever, and
+(b) if this current, near-future, or past stored-data format
+*can* be decoded with this version of the reciever,
+and if so, which *particular* current or past version
+format should be assumed.
+(2) (less important) a version number
+in the source code and in the debug output strings
+of the executable.
+Like most data compression algorithms,
+I expect to go through many iterations of optimization
+on the *compressor* and *decompressor*,
+such that *all* the compressors that produce v7 files
+and *all* the decompressors that can consume v7 files
+can all interoperate with each other.
+
+DAV:
+If the version number is a *date*,
+I may end up with *3* dates in the output file:
+* the date/version the stored-data format was frozen
+* the date/version the executable was "released",
+the one that created this file.
+* the date this output file was created.
+
+
+FIXME:
+tweak interface to comply with standard
+data compression / decompression interface.
+But which one?
+Perhaps:
+Ross Williams: the "V2" interface ("old_dc_stan_stream")
+Ross Williams: notes on V2, and ideas for generalizing for
+error correction, encryption, etc. ("old_dc_stan_just")
+http://ross.net/compression/interface.html
+
 */
 
 #include <stdio.h>
@@ -156,6 +232,19 @@ struct node{
     // We often initialize the parent index to 0
     // just to indicate that it isn't known yet.
     // int length; // only for debugging: FIXME: remove.
+    // volume is only for debugging.
+    int volume; // total bits for just this subtree.
+    // volume of the root node:
+    // root_node.volume = 0: still unknown
+    // root_node.volume anything else:
+    // the total bits in the compressed body,
+    // not including the huffman table prefix header.
+    // volume of leaf nodes: 0 (because it makes the math work out)
+    // volume of 1st interior node pointing only to leaf nodes:
+    // for this subtree alone, each leaf uses 1 bit / trit / etc.,
+    // so the 1st node volume = sum( count( each leaf ) )
+    // for general interior node:
+    // volume = sum( count(each child) ) + sum( volume(each child) ).
 };
 
 void
@@ -214,6 +303,7 @@ and inserting the new "merged" node
 at the "best" end --
 the end that requires the least shuffling of other nodes.
 * Rather than a linear list, perhaps a priority heap?
+* FUTURE: some faster sorted queue implementation?
 */
 static
 void
@@ -317,7 +407,7 @@ should give *better* compression than binary,
 and vice versa.
 In particular,
 trinary should be best for files where letter frequencies
-are 1/3, 1/9, 1/27, 81, 243, or etc.
+are 1/3, 1/9, 1/27, 1/81, 1/243, or etc.
 (even after the overhead of converting trinary
 back to binary and storing in a binary computer file).
 Perhaps measure both ways:
@@ -346,6 +436,9 @@ somewhere else
 so this "huffman()" routine
 only sees the *actual* symbols in use
 and all the symbol_frequencies are positive?
+FIXME:
+if we always allocate node list[] with calloc(),
+can we skip this initialization?
 */
 void
 setup_nodes(
@@ -539,6 +632,10 @@ in numerical order.
 The (Huffman-compressed) length of the letter 'b'
 is stored in lengths['b'].
 
+FIXME:
+always allocate lengths[] with calloc(),
+so we can skip the zero initialization?
+
 */
 void
 summarize_tree_with_lengths(
@@ -627,9 +724,9 @@ void test_summarize_tree_with_lengths(void){
 #define text_symbols_doubled (6)
     const int text_symbols = (text_symbols_doubled) / 2;
     struct node list_a[text_symbols_doubled] = {
-        { true, 9, 0, 0, 'a', 2 },
-        { true, 9, 0, 0, 'b', 2 },
-        { false, 4, 0, 1, 0, 0 }
+        { true, 9, 0, 0, 'a', 2, 0 },
+        { true, 9, 0, 0, 'b', 2, 0 },
+        { false, 4, 0, 1, 0, 0, 0 }
     };
     int leaves = 2;
     int max_leaf_value = 'z';
@@ -644,11 +741,11 @@ void test_summarize_tree_with_lengths(void){
 
 #define list_b_length (5)
     struct node list_b[list_b_length] = {
-        { true, 9, 0, 0, 'a', 4 },
-        { true, 9, 0, 0, 'b', 3 },
-        { true, 8, 0, 0, 'c', 3 },
-        { false, 17, 1, 2, 0, 4 },
-        { false, 26, 0, 3, 0, 0 }
+        { true, 9, 0, 0, 'a', 4, 0 },
+        { true, 9, 0, 0, 'b', 3, 0 },
+        { true, 8, 0, 0, 'c', 3, 0 },
+        { false, 17, 1, 2, 0, 4, 0 },
+        { false, 26, 0, 3, 0, 0, 0 }
     };
     leaves = 3;
     max_leaf_value = 'z';
@@ -853,7 +950,7 @@ test_various_table_representations(
     int shortest_nonzero_symbol=INT_MAX;
     for(int i=0; i<(max_symbol_value+1); i++){
         int lb = canonical_length[i];
-        uncompressed_length = symbol_frequency[i]*8;
+        uncompressed_length += symbol_frequency[i]*8;
         standard_huffman_length += symbol_frequency[i]*lb;
         longest_symbol = imax(longest_symbol, lb);
         if(lb){
@@ -890,11 +987,76 @@ test_various_table_representations(
     return 0;
 }
 
+/*
+inspired by
+zbyszek
+https://stackoverflow.com/questions/994593/how-to-do-an-integer-log2-in-c/22418446#22418446
+*/
+static inline int
+log2i(int x) {
+    assert(x > 0);
+    // "...clz()" is for "int"
+    // "...clzl()" is for "long int".
+    return sizeof(int) * 8 - __builtin_clz(x) - 1;
+}
+
+/*
+inspired by
+https://stackoverflow.com/questions/3272424/compute-fast-log-base-2-ceiling
+*/
+int
+ceil_log2(int x){
+    if(2 >= x){ return (1); };
+    return ( log2i( x - 1 ) + 1 );
+}
+
+int
+find_compressed_data_size(
+    int max_symbol_value,
+    int symbol_frequencies[max_symbol_value+1],
+    int canonical_lengths[max_symbol_value+1],
+    int compressed_symbols
+    ){
+    assert(compressed_symbols);
+    int max_length = 0;
+    int min_length = INT_MAX;
+    int nonzero_symbols = 0;
+    int data_size = 0;
+    int uncompressed_length = 0;
+    for( int i=0; i<(max_symbol_value+1); i++){
+        int a_length = canonical_lengths[i];
+        max_length = imax( max_length, a_length );
+        if(0 < a_length){
+            min_length = imin( min_length, a_length );
+            nonzero_symbols++;
+            data_size += a_length * symbol_frequencies[i];
+            uncompressed_length += symbol_frequencies[i];
+            assert( 0 < symbol_frequencies[i] );
+        }else{
+            assert( 0 == a_length );
+            assert( 0 == symbol_frequencies[i] );
+        };
+    };
+    printf("# %i is the max length!!!!!!!!!!!!!!!!!!!!!\n", max_length);
+    printf("# %i is the min length.\n", min_length);
+    printf("# nonzero_symbols: %i.\n", nonzero_symbols );
+    int uniform_bits = ceil_log2(nonzero_symbols);
+    printf("# uniform_bits: %i\n", uniform_bits);
+    printf("# uniform data size: %i\n",
+        uniform_bits * uncompressed_length
+        );
+    printf("# compressed data_size, not including header: %i\n",
+        data_size
+        );
+
+    return data_size;
+}
+
 void
 next_block(void){
     printf("# Starting next block...\n");
     // FIXME: use a larger buffer,
-    // perhaps with malloc() or realloc() or both?
+    // perhaps with calloc() or realloc() or both?
     const size_t bufsize = 65000;
     char original_text[bufsize+1];
     size_t used = load_more_text( stdin, bufsize, original_text );
@@ -978,10 +1140,8 @@ void
 test_next_block(void){
     printf("# Starting next block...\n");
     // FIXME: use a larger buffer,
-    // perhaps with malloc() or realloc() or both?
-    /*
+    // perhaps with calloc() or realloc() or both?
     const size_t bufsize = 65000;
-    */
     char original_text[65000+1] =
         ""
 "/* n_ary_huffman.c"
@@ -1006,9 +1166,7 @@ test_next_block(void){
 ")Z"
 "*/"
         "";
-    /*
     size_t original_length = strlen( original_text );
-    */
 
     // FIXME: support arbitrary number of symbols.
     const int max_symbol_value = 258;
@@ -1035,24 +1193,27 @@ test_next_block(void){
         compressed_symbols,
         canonical_lengths
     );
-    /*
     printf("# now we have the canonical lengths ...\n");
     debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
-    */
-    /*
+    int compressed_data_size = 
+    find_compressed_data_size(
+        max_symbol_value,
+        symbol_frequencies,
+        canonical_lengths,
+        compressed_symbols
+        );
+    printf("# compressed_data_size, not including header: %i symbols\n",
+        compressed_data_size
+        );
     test_various_table_representations(
         max_symbol_value,
         symbol_frequencies,
         canonical_lengths
     );
-    */
-    /*
-    printf("# compressing text.");
+    printf("# compressing text.\n");
     char compressed_text[bufsize+1];
     compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
-    */
-    /*
-    printf("# decompressing text.");
+    printf("# decompressing text.\n");
     char decompressed_text[bufsize+1];
     decompress( compressed_text, decompressed_text );
     size_t decompressed_length = strlen( decompressed_text );
@@ -1064,12 +1225,12 @@ test_next_block(void){
     }else{
         printf("Successful test.\n");
     }
-    */
 }
 
 void run_tests(void){
     test_summarize_tree_with_lengths();
     test_setup_nodes();
+    test_next_block();
     next_block();
 }
 

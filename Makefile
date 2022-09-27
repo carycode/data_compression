@@ -7,6 +7,18 @@
 # https://software.codidact.com/posts/282565
 CFLAGS := $(CFLAGS) -std=c17 -pedantic-errors -Wall -Wextra -Werror -Wunused-result
 
+# optional:
+# warn on excessively large VLAs;
+# DAV first heard of this warning at
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=98217
+CFLAGS := $(CFLAGS) -Wvla-larger-than=0
+
+# FUTURE:
+# perhaps add the C compiler options
+# and other static and dynamic tools
+# mentioned by
+# https://invisible-island.net/personal/lint-tools.html
+
 default: time_test
 
 time_test: \
