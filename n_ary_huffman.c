@@ -61,6 +61,8 @@ or
 base9 digits
 or
 base27 digits
+or
+base81 digits
 or (for decimal)
 base-10 digits
 or (for senary)
@@ -154,6 +156,36 @@ Ross Williams: the "V2" interface ("old_dc_stan_stream")
 Ross Williams: notes on V2, and ideas for generalizing for
 error correction, encryption, etc. ("old_dc_stan_just")
 http://ross.net/compression/interface.html
+or perhaps
+"Coroutines in C"
+by Simon Tatham
+https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html
+as used by
+libb64
+https://sming.readthedocs.io/en/latest/_inc/Sming/Components/libb64/
+
+FIXME:
+I want this library to be able
+to be used in
+an arbitrarily long-running pipeline
+and with arbitrarily-large files;
+that means that we don't have room
+to read *all* the data
+before processing it,
+we must read a little at a time.
+
+FUTURE:
+Should the decompressor
+"work correctly" with concatenated files?
+(see
+https://en.wikibooks.org/wiki/Data_Compression/Streaming_Compression
+).
+
+FIXME:
+avoid defining buffers with random "+1" sizes,
+and instead follow the recommendations at
+https://embeddedgurus.com/stack-overflow/2011/03/the-n_elements-macro/
+.
 
 */
 
@@ -172,6 +204,15 @@ FUTURE:
 consider using
 https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
 */
+
+/* base64url (RFC 4648) */
+char base64url_table[] =
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+"abcdefghijklmnopqrstuvwxyz"
+"0123456789"
+"-_";
+
+
 
 // FIXME: support much larger numbers of symbols
 // than 256 'char'.
@@ -910,9 +951,60 @@ of the canonical list of lengths).
 */
 static
 void compress(
+    const int max_symbol_value,
+    int canonical_lengths[max_symbol_value+1],
+    const int compressed_symbols, // 2 for binary, 3 for trinary, etc.
+    const int bufsize, // const size_t bufsize,
+    const int original_length,
+    char original_text[bufsize+1],
+    char compressed_text[bufsize+1] // output
 ){
-    // FIXME:
-    assert(0);
+    assert( original_length <= bufsize );
+    if(max_symbol_value > 1000){
+        assert(0);
+    };
+    if( compressed_symbols < 2 ){
+        assert(0); 
+    };
+    if( compressed_symbols > 2 ){
+        // FIXME:
+        assert(0);
+    };
+    if(1){
+        // currently only handles ASCII text.
+        // FUTURE: handle arbitrary binary.
+        // FUTURE: handle more than 257 source symbols.
+        assert(0 == canonical_lengths[0]);
+    };
+    int huffman_data_size = original_length; // FIXME
+    int huffman_header_size = 256; // FIXME
+    // if it doesn't save any space to Huffman compress --
+    // such as when all canonical lengths are the same --
+    // fall back to simple pass-thru raw data.
+    if( huffman_data_size + huffman_header_size >= original_length ){
+        printf("# pass-through raw data.\n");
+        char * d = compressed_text;
+        char * type = "\n\n"; // pass-through type
+        int netstring_length = original_length + strlen(type);
+        sprintf(d, "%d:%s%.*s,",
+            netstring_length, type, original_length, original_text
+            );
+    };
+}
+
+static int
+get_compressed_block_length( const char * s ){
+    // Later this will be restricted more,
+    // but currently "%i"
+    // supports base-16 if blocks begin with "0x" or "0X",
+    // base-8 if it begins with 0,
+    // and base 10 otherwise.
+    int length = 0;
+    sscanf( s, "%i", &length );
+    assert( length <=  32768 );
+    assert( length <= 0x8000 );
+    assert( 0 <= length );
+    return length;
 }
 
 /*
@@ -920,14 +1012,212 @@ Given a block of compressed text
 (starting with a compact representation
 of the canonical list of lengths),
 recover the uncompressed text.
+
+For each block,
+the decoder inspects the header to decide:
+* pass-thru without changes
+(the decoder simply deletes the header and footer of block)
+(for maximum human-readability,
+the header ends with a newline and the footer begins with a newline)
+* read Huffman table header, and
+decompress the following 8-bit binary Huffman-compressed data
+(which may include NULL bytes)
+* A quasi-human-readable representation
+of compressed Huffman:
+(to use as examples in
+https://en.wikibooks.org/wiki/Data_Compression
+)
+** lines beginning with '#' are comments,
+ignored by the decoder
+** Text from '#' to the end of the line is a comment,
+ignored by the decoder
+** newlines and whitespace in the middle of data are ignored
+** *any* of the standard base64
+somehow (?) store the Huffman table,
+then
+** 6-bit base64url encoded Huffman data
+** 4-bit hexadecimal encoded Huffman data
+** "natural" representations of trinary and decimal Huffman
+** ... other ? ...
+
+
+Currently using
+"netstring" format
+for each block of data.
+Currently
+the "netstring length"
+at the beginning of each block
+is at most 2^15.
+arbitrarily long streams of data
+are handled as a sequence of blocks.
+Each block
+is between zero bytes of payload
+(netstring "0:," total length: 3 bytes)
+and (2^15) bytes of payload
+(netstring "32768:..........,\n"
+with 5 bytes of length + 3 bytes overhead
+for the colon, comma, and newline,
+total length: 2^15+8 bytes = 32776 bytes
+).
+
+FUTURE:
+To reduce latency
+and be friendlier to low-RAM embedded systems,
+we may limit each block to a max of 4 KBytes (?).
+
+FUTURE:
+Consider using
+one of the other formats mentioned at
+https://en.wikipedia.org/wiki/Comparison_of_data-serialization_formats
+.
+Perhaps "Smile" data format.
+Perhaps (for human-readability) JSON format.
+
+Currently the data inside each block
+begins with 2 bytes of type indicator:
+"\n\n": pass-through raw data
+"\n#": metadata string (currently only used for debugging)
+"\nX": Huffman table type 1 (human-readable)
+"\nZ": Huffman-compressed data type 1 (human-readable)
+(Each block of huffman table *should*
+be immediately followed by Huffman-compressed data block.
+).
+(However,
+it's fine to have a bunch of Huffman-compressed data blocks
+without any Huffman table blocks between them --
+each block typically uses the most-recently-defined Huffman table.
+).
+
+Currently,
+the compressor
+usually (?)
+inserts a newline byte "\n" after the ","
+at the end of the netstring block.
+ANSI C defines sscanf() to use the same fomat as strtol(),
+which (in this case correctly)
+skips over that whitespace
+when reading the decimal digits
+at the start of the *next* block.
+Future formats
+may try to "save space"
+by eliminating that ",\n" block footer.
+
+FIXME:
+Give a better user experience
+if a user tries to "decompress"
+a normal (uncompressed) file
+or a "compressed" file
+in some format other than the ones
+this program recognizes.
+I.e., compressed files
+in GIF or GZIP or BZIP format,
+or compressed files
+generated by
+incompatible far-past or far-future versions of this program.
+Currently this program
+uses a lot of assert()
+for quicker debugging.
+
+
+FIXME:
+somehow decode
+(perhaps in a special "header" block type?)
+(perhaps a field in some/all block types?)
+the semantic version number of this file.
+So ideally this program
+can tell whether it is a
+"distant future" file with breaking changes,
+a "near future / near past" file
+that this program handles natively,
+or
+one or two major past versions
+still correctly decoded by this program.
+
 */
-static
-void decompress(){
+static int
+decompress(
+    const int max_compressed_size,
+    const char compressed_text[],
+    const int max_decompressed_size,
+    char decompressed_text[] // output
+    ){
+
+    const char * s = &compressed_text[0];
+    char * d = &decompressed_text[0];
+
     // FIXME:
-    assert(0);
+    // There seems to be a conflict between
+    // (a) we want to use standard C string-handling functions,
+    // the actual compressed data
+    // and the actual decompressed data
+    // *should*
+    // be far less than the buffer size,
+    // so it *should* be OK to slap a "\0"
+    // as the last byte of both
+    // so we can guarantee
+    // standard C string-handling functions
+    // which assume a "\0" byte,
+    // we don't read
+    // past the end of the buffer ...
+    // (b) but we *also* want to handle
+    // compressed text stored in ROM.
+    const int length = get_compressed_block_length( s );
+    // In a netstring, data is the *next* character
+    // after the first ":"
+    const char * colon_pos = strchr( s, ':' );
+    assert(colon_pos); // there *should* be a ":" character.
+    const int end_of_block_index = colon_pos - s + length + 1;
+    assert( end_of_block_index < max_compressed_size );
+    // netstrings *should* end with ',' after end of data.
+    assert( ',' == s[end_of_block_index] );
+    assert( '\n' == s[end_of_block_index + 1] );
+
+    // block type indicator
+    // in the next 2 bytes after the colon:
+    assert( '\n' == colon_pos[1] );
+    char block_type = colon_pos[2];
+    const char * data_start = colon_pos + 3;
+    /*
+"case blocks in switch statements should have curly braces."
+--
+https://codingart.readthedocs.io/en/latest/c/Formatting.html
+
+"C Switch-case curly braces after every case"
+https://stackoverflow.com/questions/4241545/c-switch-case-curly-braces-after-every-case
+
+    */
+    switch( block_type ){
+    default: {
+        // unknown block type
+        assert(0);
+        }; break;
+    case '\n': { // pass-through raw data
+        printf("# raw data:\n");
+        assert( max_decompressed_size > length );
+        memcpy( d, data_start, length );
+        d[length+1] = '\0';
+        }; break;
+    case '#': { // metadata string
+        // perhaps we should just skip?
+        printf("# skipping metadata.\n");
+        }; break;
+    case 'X': { // human-readable Huffman table type 1
+        // FIXME:
+        assert(0);
+        }; break;
+    case 'Z': { // human-readable Huffman data type 1
+        assert( max_decompressed_size >= 4000  );
+        // FIXME:
+        assert(0);
+        }; break;
+
+        }; // end switch().
+
+    return length;
 }
 
 // apparently not yet in standard libraries
+// https://stackoverflow.com/questions/3437404/min-and-max-in-c
 static int
 imax( int a, int b ){
     return ((a<b)? b : a);
@@ -1057,9 +1347,10 @@ next_block(void){
     printf("# Starting next block...\n");
     // FIXME: use a larger buffer,
     // perhaps with calloc() or realloc() or both?
-    const size_t bufsize = 65000;
+    const int bufsize = 65000; // FIXME: const size_t bufsize = 65000;
     char original_text[bufsize+1];
     size_t used = load_more_text( stdin, bufsize, original_text );
+    // FUTURE: support arbitrary data, including '\0' character.
     size_t original_length = strlen( original_text );
     // FIXME: doesn't yet support reading '\0' bytes
     assert( original_length == used );
@@ -1098,19 +1389,31 @@ next_block(void){
     );
     printf("# compressing text.");
     char compressed_text[bufsize+1];
-    compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
+    compress(
+        max_symbol_value,
+        canonical_lengths,
+        compressed_symbols,
+        bufsize,
+        original_length,
+        original_text,
+        compressed_text
+        );
     printf("# decompressing text.");
     char decompressed_text[bufsize+1];
-    decompress( compressed_text, decompressed_text );
-    size_t decompressed_length = strlen( decompressed_text );
+    size_t decompressed_length =
+    decompress( bufsize+1, compressed_text, bufsize+1, decompressed_text );
+    // FUTURE: fix so it correctly handles text with '\0' bytes.
+    size_t text_length = strlen( decompressed_text );
+    assert( text_length <= 0x8000 );
     assert( original_length == decompressed_length );
+    assert( original_length == text_length );
     if( memcmp( original_text, decompressed_text, original_length ) ){
         printf("Error: decompressed text doesn't match original text.\n");
         printf("[%s] original\n", original_text);
         printf("[%s] decompressed\n", decompressed_text);
     }else{
         printf("Successful test.\n");
-    }
+    };
 }
 
 void test_setup_nodes(){
@@ -1178,9 +1481,6 @@ test_next_block(void){
     assert(compressed_symbols);
     // FUTURE: length-limited Huffman?
 
-    /*
-    int canonical_lengths[text_symbols];
-    */
     printf("# finding canonical lengths.\n");
     int canonical_lengths[max_symbol_value+1];
     for( int i=0; i<(max_symbol_value+1); i++){
@@ -1210,12 +1510,18 @@ test_next_block(void){
         symbol_frequencies,
         canonical_lengths
     );
-    printf("# compressing text.\n");
+    printf("# compressing text...\n");
     char compressed_text[bufsize+1];
-    compress( max_symbol_value, canonical_lengths, compressed_symbols, compressed_text );
+    compress(
+        max_symbol_value, canonical_lengths, compressed_symbols,
+        bufsize,
+        original_length,
+        original_text,
+        compressed_text
+    );
     printf("# decompressing text.\n");
     char decompressed_text[bufsize+1];
-    decompress( compressed_text, decompressed_text );
+    decompress( bufsize, compressed_text, bufsize, decompressed_text );
     size_t decompressed_length = strlen( decompressed_text );
     assert( original_length == decompressed_length );
     if( memcmp( original_text, decompressed_text, original_length ) ){
