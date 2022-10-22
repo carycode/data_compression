@@ -12,6 +12,8 @@ CFLAGS := $(CFLAGS) -std=c17 -pedantic-errors -Wall -Wextra -Werror -Wunused-res
 # DAV first heard of this warning at
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=98217
 CFLAGS := $(CFLAGS) -Wvla-larger-than=0
+TEST_FILE_IN := n_ary_huffman.c
+TEST_FILE_OUT := junk
 
 # FUTURE:
 # perhaps add the C compiler options
@@ -28,7 +30,11 @@ time_test: \
 #
 
 huffman_time_test: n_ary_huffman
-	time --verbose --output=huffman_time_test ./n_ary_huffman < n_ary_huffman.c
+	time --verbose --output=huffman_time_test \
+	./n_ary_huffman \
+	< n_ary_huffman.c \
+	# \
+#
 
 nybble_time_test: nybble_compression
 	time --verbose --output=nybble_time_test ./nybble_compression
@@ -49,6 +55,7 @@ clean:
 	rm -fv -- small_time_test
 	rm -fv -- huffman_time_test
 	rm -fv -- nybble_time_test
+	rm -fv -- junk
 
 #
 

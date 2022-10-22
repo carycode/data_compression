@@ -206,11 +206,46 @@ https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
 */
 
 /* base64url (RFC 4648) */
-char base64url_table[] =
+static const char
+base64url_table[] =
 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 "abcdefghijklmnopqrstuvwxyz"
 "0123456789"
 "-_";
+
+char
+int2digit(int i){
+    assert(0 <= i);
+    assert(i < 64);
+    return( base64url_table[i] );
+}
+
+int
+digit2int(char input_digit){
+    static char r[128] = {0};
+    if( 0 == r[0] ){
+        // one-time initialization
+        for(int i=0; i<128; i++){
+            r[i] = -1;
+        };
+        for(int i=0; i<64; i++){
+            char digit = int2digit(i);
+            int d = digit;
+            r[d] = i;
+        };
+        // also support other base64url sets
+        r['+'] = 62; // RFC 4648 standard
+        r['/'] = 63; // RFC 4648 standard
+        r['-'] = 62; // RFC 4648 base64url
+        r['_'] = 63; // RFC 4648 base64url
+    };
+    assert( 0 < input_digit );
+    unsigned char d = input_digit;
+    assert( d <= 127 );
+    int result = r[d];
+    assert( -1 != result );
+    return(result);
+}
 
 
 
@@ -317,7 +352,13 @@ debug_print_node_list(
 /*
 it wouldn't hurt to completely sort,
 but we really only require
-the two smallest values.
+the two smallest values
+for binary Huffman.
+(The 3 smallest values for trinary Huffman,
+The 10 smallest values for decimal Huffman,
+...
+The n smallest values for n compressed symbols.
+).
 Some unnecessarily complex "cleverness":
 * perhaps do 2 passes of bubble sort
 towards the beginning of the array,
@@ -344,6 +385,7 @@ and inserting the new "merged" node
 at the "best" end --
 the end that requires the least shuffling of other nodes.
 * Rather than a linear list, perhaps a priority heap?
+https://en.wikipedia.org/wiki/Partial_sorting
 * FUTURE: some faster sorted queue implementation?
 */
 static
@@ -532,9 +574,10 @@ generate_huffman_tree(
     // const int text_symbols,
     const int list_length,
     struct node list[list_length], // in-out: updated
-    const int compressed_symbols,
+    const int compressed_symbols, // 3 for trinary
     const int max_leaf_value
 ){
+    assert( 0 == list[0].count ); // FIXME: can't handle NULL bytes yet.
     assert( 0 == list[258].count );
     assert(0 == list[259].count );
     // count out zero-frequency symbols
@@ -558,8 +601,12 @@ generate_huffman_tree(
         sorted_index[i] = i;
     };
 
-    int dummy_nodes = (nonzero_text_symbols - 1) % (compressed_symbols - 1);
+    int dummy_nodes =
+        (compressed_symbols - 1) -
+        ((nonzero_text_symbols - 1) %
+        (compressed_symbols - 1));
     
+    printf("# %d : compressed symbols\n", compressed_symbols );
     if( 2 == compressed_symbols ){
         //binary
         assert( 0 == dummy_nodes );
@@ -575,8 +622,14 @@ generate_huffman_tree(
     for(int i=(max_leaf_value+1); i<(max_leaf_value + 1 + dummy_nodes); i++){
         sorted_index[i] = i;
         list[i].count = 1; // minimum count for dummy nodes.
+        // FUTURE: perhaps
+        // force dummy nodes have a nonzero count
+        // far *less* than any real node,
+        // perhaps by scaling all the real node counts
+        // by 2 or 3 or 10 or so.
     };
     assert(1 == list[259].count ); // dummy node
+    assert( 1 == ((nonzero_text_symbols + dummy_nodes) % (compressed_symbols - 1)) );
     // ZQ
 
     int min_active_node = 0;
@@ -949,8 +1002,8 @@ generate a block of compressed text
 (starting with a compact representation
 of the canonical list of lengths).
 */
-static
-void compress(
+static void
+compress(
     const int max_symbol_value,
     int canonical_lengths[max_symbol_value+1],
     const int compressed_symbols, // 2 for binary, 3 for trinary, etc.
@@ -967,8 +1020,61 @@ void compress(
         assert(0); 
     };
     if( compressed_symbols > 2 ){
+        printf("# %d : compressed_symbols.\n", compressed_symbols );
+        // FIXME:
+        printf("# header ....\n");
+        char * d = compressed_text;
+        char * type = "\nX"; // Huffman table type 1 (human-readable)
+        // FUTURE: there's probably a better way
+        // of encoding max_symbol_value and compressed_symbols.
+        int s_length = 0;
+        if(max_symbol_value < 10){
+            s_length = 1;
+        }else if(max_symbol_value < 100){
+            s_length = 2;
+        }else if(max_symbol_value < 1000){
+            s_length = 3;
+        };
+        assert(0 != s_length); // FUTURE: handle more than 1000 symbols.
+        const int netstring_length =
+            strlen(type) + s_length + 1 + max_symbol_value + 1;
+        printf("# netstring_length: %d\n", netstring_length);
+        d +=
+        sprintf(d, "%d:", // start of netstring
+            netstring_length
+            );
+        int start_of_header_index = d - compressed_text;
+        d +=
+        sprintf(d, "%s%d:",
+            type, max_symbol_value
+            );
+        printf("# %s", compressed_text );
+        for( int i=0; i<=max_symbol_value; i++ ){
+            d +=
+            sprintf(d, "%d",
+                canonical_lengths[i]
+                );
+        };
+        int end_of_header_index = d - compressed_text;
+        d +=
+        sprintf(d, ","); // end of netstring
+        const int actual_header_size = end_of_header_index - start_of_header_index;
+        printf("# actual header size: %d\n", actual_header_size);
+        assert( actual_header_size == netstring_length );
+        printf("# data ....\n");
+        d +=
+        sprintf(d, "%d:", // start of netstring
+            netstring_length
+            );
         // FIXME:
         assert(0);
+        /*
+        sprintf(d, "%d:%s%.*s,",
+            netstring_length, type, original_length, original_text
+            );
+        */
+        sprintf(d, ","); // end of netstring
+        printf("# compressed.\n");
     };
     if(1){
         // currently only handles ASCII text.
@@ -1064,6 +1170,23 @@ FUTURE:
 To reduce latency
 and be friendlier to low-RAM embedded systems,
 we may limit each block to a max of 4 KBytes (?).
+
+Does it make any sense to
+"leave out" certain lengths --
+for example,
+encode every byte length
+from 0 to 256 bytes literally,
+then have
+"257" represent 1.5*256 bytes,
+"258" represent 2*256 bytes,
+"259" represent 3*256 bytes,
+"260" represent 4*256 bytes,
+"261" represent 5*256 bytes,
+etc.
+so that
+certain amounts of bytes
+are forced to be represented
+as 2 blocks?
 
 FUTURE:
 Consider using
@@ -1216,8 +1339,10 @@ https://stackoverflow.com/questions/4241545/c-switch-case-curly-braces-after-eve
     return length;
 }
 
-// apparently not yet in standard libraries
+// integer min and max apparently not yet in standard libraries
 // https://stackoverflow.com/questions/3437404/min-and-max-in-c
+// although some people claim it is in stdlib.h
+// http://tigcc.ticalc.org/doc/stdlib.html#min
 static int
 imax( int a, int b ){
     return ((a<b)? b : a);
@@ -1470,6 +1595,29 @@ test_next_block(void){
 "*/"
         "";
     size_t original_length = strlen( original_text );
+
+
+/*
+           0 1 2 3 4 5 6 7 8 9
+length 1:  e t a n s l       space
+length 2:  - . 0 1 5 7 8 : A D
+length 2:  E H b c d f g h i m
+length 2:  o p r u v y
+length 3:  ' ( ) * , / 3 6 C F
+length 3:  G I L M N O R T W Z
+length 3:  _ k w x
+
+
+           0 1 2 3 4 5 6 7 8
+length 1:  e   a n s       space
+length 2:  - . 0 1 2 5 6 7 8
+length 2:  : A D E H _ b c d
+length 2:  f g h i l m o p r
+length 2:  t u v w x y
+length 3:  ' ( ) * , / 3 C F
+length 3:  G I L M N O R T W
+length 3:  Z k
+*/
 
     // FIXME: support arbitrary number of symbols.
     const int max_symbol_value = 258;
