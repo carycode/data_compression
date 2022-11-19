@@ -81,6 +81,23 @@ FUTURE: length-limited Huffman?
 
 FUTURE: use size_t rather than int for array lengths?
 
+Future: perhaps
+<q>
+Of the built-in integer types only use char, int, uint8_t, int8_t,
+uint16_t, int16_t, uint32_t, int32_t, uint64_t, int64_t,
+uintmax_t, intmax_t, size_t, ssize_t, uintptr_t, intptr_t, and
+ptrdiff_t.
+...
+printf format placeholders ...
+size_t %zu (unsigned) ...
+ssize_t %zd (signed)
+</q>
+--
+as recommended by
+https://neovim.io/doc/user/dev_style.html
+
+
+
 FUTURE:
 perhaps break up this monolithic file
 into 2 or more separate files:
@@ -88,9 +105,16 @@ into 2 or more separate files:
 * compression-only library
 * usage example, which also stress-tests those libraries
 
+FUTURE:
+make this an easily-usable library;
+follow tips from
+"Library Writing Realizations"
+http://cbloomrants.blogspot.com/2015/09/library-writing-realizations.html
+
 
 Currently this implementation
 never uses dynamic allocation.
+Or C99-style "variable-length arrays".
 So we never have to worry about
 garbage collection / memory fragmentation
 memory leakage / etc.
@@ -98,6 +122,11 @@ If you do use dynamic allocation in the future,
 consider continuing to avoid malloc()
 and instead using things like calloc()
 which ensure the new memory block is initialized.
+
+Currently this implementation never uses
+* "typedef"
+* it's careful to use "char" only for
+letters of text, and not assume it's signed or unsigned.
 
 FUTURE:
 pick a version numbering system:
@@ -187,6 +216,23 @@ and instead follow the recommendations at
 https://embeddedgurus.com/stack-overflow/2011/03/the-n_elements-macro/
 .
 
+FUTURE: benchmark this compressor.
+* "Tips for benchmarking a compressor"
+https://cbloomrants.blogspot.com/2016/05/tips-for-benchmarking-compressor.html
+* "Data Compression/Evaluating Compression Effectiveness"
+https://en.wikibooks.org/wiki/Data_Compression/Evaluating_Compression_Effectiveness
+* "Benchmark files"
+https://en.wikibooks.org/wiki/Data_Compression/References#Benchmark_files
+
+
+I attempted to make this compressor use a
+more-or-less human-readable output format:
+* lines starting with '#' are comments
+* whitespace is also optionally added for human readability
+* base64_url, hexadecimal, decimal, etc. digits
+on non-comment lines contain the compressed data.
+* ... netstring ... JSON ... ?
+
 */
 
 #include <stdio.h>
@@ -205,16 +251,78 @@ consider using
 https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
 */
 
-/* base64url (RFC 4648) */
-static const char
-base64url_table[] =
-"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-"abcdefghijklmnopqrstuvwxyz"
-"0123456789"
-"-_";
+// integer min and max apparently not yet in standard libraries
+// https://stackoverflow.com/questions/3437404/min-and-max-in-c
+// although some people claim it is in stdlib.h
+// http://tigcc.ticalc.org/doc/stdlib.html#min
+static int
+imax( int a, int b ){
+    return ((a<b)? b : a);
+}
+static int
+imin( int a, int b){
+    return ((a<b)? a : b);
+}
 
-char
+
+/* base64url (RFC 4648) */
+/* used for binary Huffman
+when "human-readable" output is selected.
+*/
+static char
 int2digit(int i){
+    const char
+    base64url_table[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789"
+    "-_";
+
+    /* Ascii85 (RFC1924 "joke RFC") */
+    /* git uses RFC1924 Ascii84:
+    https://github.com/git/git/blob/master/base85.c
+    */
+#if (0)
+    const char
+    ascii85_table[] =
+    "0123456789"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "!#$%&()*+-"
+    ";<=>?@^_`{"
+    "|}~";
+#endif
+    /* Z85 encoding https://rfc.zeromq.org/spec/32/ */
+#if (0)
+    const char
+    z85_table[] =
+    "0123456789"
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    ".-:+=^!/"
+    "*?&<>()[]{"
+    "}@%$#";
+#endif
+    /*
+    The special case of
+    encoding
+    2 base-9 digits, or
+    4 base-3 digits,
+    per compressed output character.
+    uses the first 81 characters
+    in this Z85 table.
+    (The Ascii85 table would work just as well).
+    They use only ASCII isgraph() characters
+    and avoids awkward characters
+    double-quote, backslash, and space.
+    "there are just 94 ASCII characters
+    (excluding control characters, space, and del)"
+    -- RFC1924
+
+    2 base-6 digits in one char requires 36 chars
+    3 base-6 digits in one char requires 216 chars
+    */
+
     assert(0 <= i);
     assert(i < 64);
     return( base64url_table[i] );
@@ -241,7 +349,7 @@ digit2int(char input_digit){
     };
     assert( 0 < input_digit );
     unsigned char d = input_digit;
-    assert( d <= 127 );
+    assert( d < 128 );
     int result = r[d];
     assert( -1 != result );
     return(result);
@@ -994,6 +1102,98 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
     return -1;
 }
 
+void
+convert_lengths_to_encode_table(
+        const int max_symbol_value,
+        int canonical_lengths[max_symbol_value+1],
+        int encode_length_table[max_symbol_value+1],
+        unsigned int encode_value_table[max_symbol_value+1]
+    ){
+    assert(max_symbol_value);
+    assert(0);
+    int max_canonical_length = 0;
+    for(int i=0; i<max_symbol_value; i++){
+        max_canonical_length = imax(
+                max_canonical_length,
+                canonical_lengths[i]
+                );
+    }
+    // FUTURE: need to allow longer lengths
+    // if we have huge Huffman tables.
+    assert(max_canonical_length < 16);
+    assert(0 == canonical_lengths[0]);
+    for(int i=0; i<max_symbol_value; i++){
+        encode_length_table[i] = 0;
+        encode_value_table[i] = 0;
+    };
+    assert(0);
+}
+
+
+/*
+starts writing into compressed_text
+at byte compressed_text[start],
+last byte written is
+at byte compressed_text[start + retval -1]. (???)
+*/
+int
+represent_items_with_codes(
+            const int max_symbol_value,
+            int canonical_lengths[max_symbol_value+1],
+            const int compressed_symbols, // 2 for binary, 3 for trinary, etc.
+            const int bufsize, // const size_t bufsize,
+            const int original_length,
+            char original_text[bufsize+1],
+            int start, // index to start writing in compressed_text
+            char compressed_text[bufsize+1] // output
+    ){
+
+    unsigned int encode_value_table[max_symbol_value + 1];
+    int encode_length_table[max_symbol_value + 1];
+    assert(sizeof(encode_value_table) >= 16);
+    // the convert_lengths_to_encode_table
+    // has some endian-sensitive stuff
+    // in the encode_value_table
+    convert_lengths_to_encode_table(
+        max_symbol_value,
+        canonical_lengths,
+        encode_length_table,
+        encode_value_table
+        );
+    // FUTURE: handle various other output formats
+    // Currently using base64url.
+    const int bits_per_output_symbol = 6; // base64url
+    int bit_offset = 0;
+    int char_offset = start;
+    for(int i=0; i<original_length; i++){
+        // FUTURE: consider re-ordering
+        // to make more byte-aligned.
+        // For now, completely bit-oriented.
+        int item = original_text[i];
+        int encoded_value = encode_value_table[item];
+        int encoded_length = encode_length_table[item];
+        assert(encoded_length > 0);
+        assert(encoded_value < (1<<encoded_length));
+
+        assert(0);
+
+        bit_offset += encoded_length;
+        while( bit_offset >= bits_per_output_symbol ){
+            assert(bit_offset > 0);
+            assert(0);
+            assert(2 == compressed_symbols);
+            const char letter = int2digit(encoded_value);
+            assert(0);
+            compressed_text[char_offset] = letter;
+            char_offset++;
+            bit_offset =- bits_per_output_symbol;
+        };
+
+    };
+
+    return 32767;
+}
+
 /*
 Given a list of lengths
 (one length for each symbol)
@@ -1062,11 +1262,43 @@ compress(
         printf("# actual header size: %d\n", actual_header_size);
         assert( actual_header_size == netstring_length );
         printf("# data ....\n");
+        // FIXME: quick hack:
+        // reserve 5 digits for length;
+        // later overwrite with correct value.
+        const int data_length_initial = 32767; // initial guess
+        int data_length_index = d - compressed_text;
         d +=
         sprintf(d, "%d:", // start of netstring
-            netstring_length
+            data_length_initial
             );
-        // FIXME:
+
+        d +=
+        represent_items_with_codes(
+            max_symbol_value,
+            canonical_lengths,
+            compressed_symbols, // 2 for binary, 3 for trinary, etc.
+            bufsize, // const size_t bufsize,
+            original_length,
+            original_text,
+            (d - compressed_text),
+            compressed_text
+            );
+        const int actual_data_length = d - compressed_text;
+        if(data_length_initial == actual_data_length){
+            printf("# guessed correct length, nothing to do.\n");
+        }else{
+            // Quick hack:
+            // reserve 5 digits for length;
+            // later overwrite with correct value.
+            // if it's 9999 or less,
+            // left-pad with spaces.
+            // FIXME: somehow get rid of that padding.
+            printf("# %d: actual data length", actual_data_length);
+            assert(actual_data_length <= 32767);
+            sprintf(d+data_length_index, "% 5d:", // start of netstring
+                actual_data_length
+                );
+        };
         assert(0);
         /*
         sprintf(d, "%d:%s%.*s,",
@@ -1337,19 +1569,6 @@ https://stackoverflow.com/questions/4241545/c-switch-case-curly-braces-after-eve
         }; // end switch().
 
     return length;
-}
-
-// integer min and max apparently not yet in standard libraries
-// https://stackoverflow.com/questions/3437404/min-and-max-in-c
-// although some people claim it is in stdlib.h
-// http://tigcc.ticalc.org/doc/stdlib.html#min
-static int
-imax( int a, int b ){
-    return ((a<b)? b : a);
-}
-static int
-imin( int a, int b){
-    return ((a<b)? a : b);
 }
 
 int
