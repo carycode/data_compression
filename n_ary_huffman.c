@@ -81,6 +81,19 @@ FUTURE: length-limited Huffman?
 
 FUTURE: use size_t rather than int for array lengths?
 
+Future:
+specify integer sizes
+using the standard types
+defined in stdint.h
+INT_FAST8_MIN <= int_fast8_t <= INT_FAST8_MAX
+INT_FAST16_MIN <= int_fast16_t <= INT_FAST16_MAX
+0 <= uint_fast16_t <= UINT_FAST16_MAX
+Unclear if I should directly include stdint.h,
+or if I should only include
+inttypes.h
+(which in turn includes <stdint.h>, which in turn includes <limits.h>
+).
+
 Future: perhaps
 <q>
 Of the built-in integer types only use char, int, uint8_t, int8_t,
@@ -123,9 +136,9 @@ consider continuing to avoid malloc()
 and instead using things like calloc()
 which ensure the new memory block is initialized.
 
-Currently this implementation never uses
-* "typedef"
-* it's careful to use "char" only for
+Currently
+* this implementation never uses "typedef"
+* this implementation is careful to use "char" only for
 letters of text, and not assume it's signed or unsigned.
 
 FUTURE:
@@ -244,6 +257,26 @@ on non-comment lines contain the compressed data.
 #include <limits.h> // for INT_MAX
 
 #define COMPILE_TIME_ASSERT(pred) switch(0){case 0:case pred:;}
+/*
+FUTURE:
+How should I spell the compile-time check?
+https://en.wikibooks.org/wiki/C_Programming/Preprocessor_directives_and_macros#Compile-time_assertions
+spells it COMPILE_TIME_ASSERT() .
+In C++, it's spelled static_assert() .
+Gnu C
+https://www.gnu.org/software/c-intro-and-ref/manual/html_node/Static-Assertions.html
+seems to spell it as _Static_assert() .
+The Loki library
+https://stackoverflow.com/questions/31926676/where-is-static-assert-implemented
+apparently spells it as STATIC_CHECK() .
+*/
+/*
+FUTURE:
+Use (compile-time check) where possible.
+Where possible, replace run-time asserts with compile-time asserts.
+Continue to use assert() (run-time check)
+for things that cannot be checked at compile-time.
+*/
 
 /*
 FUTURE:
