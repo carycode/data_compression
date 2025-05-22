@@ -1,6 +1,6 @@
 
 /* n_ary_huffman.c
-WARNING: version  2021.00.01-alpha : extremely rough draft.
+WARNING: version  0.2021.00.01-alpha : extremely rough draft.
 2021-10-25: started by David Cary
 
 A few experiments with
@@ -1137,27 +1137,59 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
 
 void
 convert_lengths_to_encode_table(
+        /* inputs */
         const int max_symbol_value,
         int canonical_lengths[max_symbol_value+1],
+        /* outputs */
         int encode_length_table[max_symbol_value+1],
         unsigned int encode_value_table[max_symbol_value+1]
     ){
     assert(max_symbol_value);
-    assert(0);
     int max_canonical_length = 0;
+    int min_canonical_length = 300;
     for(int i=0; i<max_symbol_value; i++){
+        const int debug = 1;
+        if(debug){
+            if( canonical_lengths[i] < 0 ){
+                printf(
+                    "unexpected length: i = %i; canonical_length[i] = %i \n",
+                    i, canonical_lengths[i]
+                    );
+            };
+        };
+        assert( canonical_lengths[i] >= 0 );
         max_canonical_length = imax(
                 max_canonical_length,
                 canonical_lengths[i]
                 );
+        // the min canonical length that is not zero.
+        if(0 != canonical_lengths[i]){
+            min_canonical_length = imin(
+                min_canonical_length,
+                canonical_lengths[i]
+                );
+        };
     }
     // FUTURE: need to allow longer lengths
     // if we have huge Huffman tables.
     assert(max_canonical_length < 16);
+    assert(0 < min_canonical_length);
+    assert( min_canonical_length <= max_canonical_length );
+    // FIXME: perhaps we shouldn't assume the NULL character never occurs.
     assert(0 == canonical_lengths[0]);
+
+    // clear the symbol tables
     for(int i=0; i<max_symbol_value; i++){
         encode_length_table[i] = 0;
         encode_value_table[i] = 0;
+    };
+    // construct the canonical Huffman codes,
+    // where
+    // encode_length_table[i] == the number of bits to represent character i
+    // encode_value_table[i] == the binary value to represent character i
+    for( int current_length = min_canonical_length; current_length <= max_canonical_length; current_length++){
+
+
     };
     assert(0);
 }
@@ -1520,6 +1552,44 @@ that this program handles natively,
 or
 one or two major past versions
 still correctly decoded by this program.
+
+FUTURE:
+Consider experimenting with other ways
+of representing the Huffman table.
+Currently each block of Huffman compressed data
+starts with
+DAV's Type 1 Huffman table.
+Experiment with other options:
+(a) different types of Huffman table
+(perhaps, say, encode only the 10 most-frequent letters exactly,
+and then assume the remaining letters are
+practically equal-frequency --
+hopefully the bits we lose using non-perfect Huffman lengths
+are made up by requiring a much shorter header table).
+(b) use less space in Huffman tables
+by *remembering* the last N non-idendical Huffman tables
+and then
+occasionally starting a block
+with something that tells the decoder
+"This next block uses identically the same Huffman table
+as the M'th non-identical Huffman table ago."
+(c) Use less space in Huffman tables
+by starting a block with something
+that indicates
+"This next block uses a Huffman table *similar*
+to the M'th non-identical Huffman table ago,
+but with these small changes".
+Unclear exactly how to represent "small" changes
+to a Huffman table.
+One approach is
+simply point-wise *subtract* the two lists of bitlengths,
+and then
+somehow encode the (presumably small) *difference* values;
+Presumably the representation of those changes
+can be made even smaller
+by somehow taking advantage of the
+Kraft inequality.
+
 
 */
 static int
