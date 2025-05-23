@@ -525,6 +525,46 @@ at both ends,
 and inserting the new "merged" node
 at the "best" end --
 the end that requires the least shuffling of other nodes.
+* FIXME: when merging,
+make sure
+(if there is an option -- sometimes there is no option)
+we always
+pick the N that *minimizes*
+the longest Huffman code.
+For example, if we have frequencies of
+1, 1, 2, 2,
+and if we have N=2 (binary Huffman),
+prefer to make the tree
+            6
+         /     \
+        2       4
+       / \     / \
+      1   1   2   2
+      (depth = longest Huffman code length=2)
+rather than
+            6
+           / \
+          4   2
+         / \
+        2   2
+       / \
+      1   1
+      (depth = longest Huffman code length = 3)
+.
+*Both* of these trees
+can be converted to (different) canonical Huffman codes.
+Both of these trees give exactly the same
+total compressed bitlength compressed payload.
+I suspect (?) that
+the minimum-depth tree
+will make decompressing a little faster
+and
+perhaps (?)
+the minimum-depth tree
+will make the header
+(representing the canonical Huffman tree)
+at the beginning of the compressed block
+a little shorter.
 * Rather than a linear list, perhaps a priority heap?
 https://en.wikipedia.org/wiki/Partial_sorting
 * FUTURE: some faster sorted queue implementation?
@@ -1138,11 +1178,11 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
 void
 convert_lengths_to_encode_table(
         /* inputs */
-        const int max_symbol_value,
-        int canonical_lengths[max_symbol_value+1],
+        const int max_symbol_value, // input-only
+        int canonical_lengths[max_symbol_value+1], // input-only
         /* outputs */
-        int encode_length_table[max_symbol_value+1],
-        unsigned int encode_value_table[max_symbol_value+1]
+        int encode_length_table[max_symbol_value+1], // output-only
+        unsigned int encode_value_table[max_symbol_value+1] // output-only
     ){
     assert(max_symbol_value);
     int max_canonical_length = 0;
@@ -1187,10 +1227,103 @@ convert_lengths_to_encode_table(
     // where
     // encode_length_table[i] == the number of bits to represent character i
     // encode_value_table[i] == the binary value to represent character i
+    //
+    //
+    // The longest 2 codes in binary canonical Huffman
+    // are always the same length.
+    // (There may or may not be other codes just as long).
+    // Since Huffman codes
+    // always produce a "complete" binary tree,
+    // there's always exactly
+    // one leaf labeled with the all-ones code
+    // and
+    // one leaf labeled with the all-zeros code.
+    //
+    // There seem to be 2 slightly different definitions:
+    // (both have exactly the same length
+    // for each and every code,
+    // so make no difference in total compressed file):
+    // Wikipedia: Canonical Huffman
+    // has the all-ones code be the longest,
+    // and the all-zeros code be the shortest.
+    // Michael Schindler
+    // http://www.compressconsult.com/huffman/#canonical
+    // has the all-ones code be the shortest,
+    // and the all-zeros code be the longest.
+    //
+    // For now I'm choosing
+    // all-ones code as the longest
+    // (this may change later).
+    // In that case,
+    // the longest 2 codes in binary canonical Huffman are
+    // the all-ones code
+    // and a code that is all-ones followed by a single 0.
+    // FUTURE:
+    // Consider alternate representation:
+    // a bunch of '0' bits,
+    // followed by zero or more bits
+    // starting with a '1' bit.
+    // The
+    // http://www.compressconsult.com/huffman/#canonical
+    // points out (with proof) that 
+    // (with Schindler's definition of canonical Huffman)
+    // "The first rule guarantees that no more than the ceil(log2(alphabetsize)) rightmost bits of the code can differ from zero - see below."
+    // The
+    // https://www.anaesthetist.com/mnm/compress/huffman/Findex.htm#index.htm
+    // says the same thing
+    // (and uses the same definition
+    // with all-zeros being the longest code,
+    // and all-ones as the shortest code).
+    // With an alphabetsize of 512 symbols,
+    // this implies that
+    // no more than 9 rightmost bits of the code
+    // can differ from zero;
+    // so the code for each of those 512 symbols
+    // can be represented by
+    //      numzeros: the number of zeros at the beginning of the code
+    //      (implicit 1 for every symbol that's not the all-zeros symmbol)
+    //      rightmost_bits: up to 8 more arbitrary bits.
+    //
+    // Currently we scan through the table
+    // a bunch of times --
+    // at most max_canonical_length times.
+    // There's likely a more efficient approach.
+    #if(0)
+        // start with longest code?
+        int current_code = (1<<max_canonical_length) - 1;
+        int current_length = max_canonical_length;
+    #endif
+    // start with shortest code:
+    int current_code = 0;
+    // int current_length = min_canonical_length;
     for( int current_length = min_canonical_length; current_length <= max_canonical_length; current_length++){
-
-
+        const int debug = 1;
+        if(debug){
+            printf("current_length = %i.\n", current_length);
+        };
+        for(int i=0; i<=max_symbol_value; i++){
+            // only look at symbols
+            // that match current_length
+            // on this pass:
+            if( current_length == canonical_lengths[i] ){
+                assert( current_code < (1<<(current_length + 1)) );
+                encode_length_table[i] = current_length;
+                encode_value_table[i] = current_code;
+                if(debug){
+                    printf("Assigning i=%i to code 0x%x.\n", i, current_code);
+                };
+                current_code += 1; // increment code.
+            };
+        };
+        current_code <<= 1; // append zero bit and increment current_length
     };
+    // LSB is zero, take it back off.
+    assert( 0 == ( 1 & current_code ) );
+    current_code >>= 1;
+    // undo last increment
+    current_code -= 1;
+    // assert last code assigned is the all-ones max-length code:
+    assert( current_code == ((1<<max_canonical_length) - 1) );
     assert(0);
 }
 
