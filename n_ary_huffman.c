@@ -1179,16 +1179,25 @@ void
 convert_lengths_to_encode_table(
         /* inputs */
         const int max_symbol_value, // input-only
-        int canonical_lengths[max_symbol_value+1], // input-only
+        const int canonical_lengths[max_symbol_value+1], // input-only
+        const int compressed_symbols, // input-only: 2 for binary, 3 for trinary, etc.
         /* outputs */
         int encode_length_table[max_symbol_value+1], // output-only
         unsigned int encode_value_table[max_symbol_value+1] // output-only
     ){
+    const int debug = 1;
+    if(debug){
+        printf(
+            "compressed_symbols: i = %i; max_symbol_value = %i \n",
+            compressed_symbols,
+            max_symbol_value
+            );
+    };
+
     assert(max_symbol_value);
     int max_canonical_length = 0;
     int min_canonical_length = 300;
     for(int i=0; i<max_symbol_value; i++){
-        const int debug = 1;
         if(debug){
             if( canonical_lengths[i] < 0 ){
                 printf(
@@ -1256,13 +1265,35 @@ convert_lengths_to_encode_table(
     // (this may change later).
     // In that case,
     // the longest 2 codes in binary canonical Huffman are
+    // always
     // the all-ones code
     // and a code that is all-ones followed by a single 0.
     // FUTURE:
     // Consider alternate representation:
+    // * two numbers that encode:
     // a bunch of '0' bits,
+    // (for the all-zeros-code longest)
+    // (or a count of '1' bits, for the all-ones-code longest)
     // followed by zero or more bits
     // starting with a '1' bit.
+    // * for base-9 or base-10 Huffman compression,
+    // two numbers that encode
+    // a count of '0' digits,
+    // followed by a number that
+    // is either zero (i.e., the all-zeros symbol)
+    // or, (when printed out in the appropriate base-9 or base-10),
+    // starts with a non-zero digit 1, 2, 3, ... 8, ... etc.
+    // that is the remaining digits of the Huffman code.
+    // * for base-9 or base-10 Huffman compression,
+    // two numbers that encode
+    // a count of '0' digits,
+    // and a number that
+    // is either zero (i.e., the all-zeros symbol)
+    // or when printed out in *hexadecimal*
+    // starts with a non-zero digit 1, 2, 3, ... 8, ... etc.
+    // that is the remaining digits of the Huffman code
+    // (packed 4 bits per digit).
+    //
     // The
     // http://www.compressconsult.com/huffman/#canonical
     // points out (with proof) that 
@@ -1355,6 +1386,7 @@ represent_items_with_codes(
     convert_lengths_to_encode_table(
         max_symbol_value,
         canonical_lengths,
+        compressed_symbols, // 2 for binary, 3 for trinary, etc.
         encode_length_table,
         encode_value_table
         );
