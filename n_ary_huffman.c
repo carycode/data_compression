@@ -1175,6 +1175,24 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
     return -1;
 }
 
+
+// Similar to
+//   #include <math.h>
+//   double pow(double base, double exponent);
+// but with only integer values:
+int power(const int base, const int exp){
+    assert(0 <= exp);
+    if(0 == exp){
+        return 1;
+    }else if(exp & 2){
+        return base * power(base, exp - 1);
+    }else{
+        int temp = power(base, exp / 2);
+        return temp * temp;
+    };
+}
+
+
 void
 convert_lengths_to_encode_table(
         /* inputs */
@@ -1185,6 +1203,13 @@ convert_lengths_to_encode_table(
         int encode_length_table[max_symbol_value+1], // output-only
         unsigned int encode_value_table[max_symbol_value+1] // output-only
     ){
+    // the canonical_lengths
+    // and the encode_length_table
+    // are in terms of output symbols --
+    // i.e., a length of "3" means 3 digits,
+    // and each digit may be a trinay digit (when compressed_symbols = 3)
+    // or a bit (when compressed_symbols = 2)
+    // or etc.
     const int debug = 1;
     if(debug){
         printf(
@@ -1195,6 +1220,7 @@ convert_lengths_to_encode_table(
     };
 
     assert(max_symbol_value);
+    assert(compressed_symbols);
     int max_canonical_length = 0;
     int min_canonical_length = 300;
     for(int i=0; i<max_symbol_value; i++){
@@ -1211,6 +1237,7 @@ convert_lengths_to_encode_table(
                 max_canonical_length,
                 canonical_lengths[i]
                 );
+        // [FIXME:]
         // the min canonical length that is not zero.
         if(0 != canonical_lengths[i]){
             min_canonical_length = imin(
@@ -1234,8 +1261,8 @@ convert_lengths_to_encode_table(
     };
     // construct the canonical Huffman codes,
     // where
-    // encode_length_table[i] == the number of bits to represent character i
-    // encode_value_table[i] == the binary value to represent character i
+    // encode_length_table[i] == the number of output symbols to represent character i
+    // encode_value_table[i] == the value to represent character i
     //
     //
     // The longest 2 codes in binary canonical Huffman
@@ -1337,7 +1364,10 @@ convert_lengths_to_encode_table(
             // that match current_length
             // on this pass:
             if( current_length == canonical_lengths[i] ){
+                if(2 == compressed_symbols){
                 assert( current_code < (1<<(current_length + 1)) );
+                };
+                // assert( current_code < [FIXME:]
                 encode_length_table[i] = current_length;
                 encode_value_table[i] = current_code;
                 if(debug){
@@ -1346,15 +1376,27 @@ convert_lengths_to_encode_table(
                 current_code += 1; // increment code.
             };
         };
+        if(0){ // only binary
         current_code <<= 1; // append zero bit and increment current_length
+        };
+        current_code *= compressed_symbols; // append zero symbol and increment current_length
     };
     // LSB is zero, take it back off.
-    assert( 0 == ( 1 & current_code ) );
+    if( 2 == compressed_symbols ){
+        assert( 0 == ( 1 & current_code ) );
+    };
+    assert( 0 == ( current_code % compressed_symbols ) );
+    if(0){ // only binary
     current_code >>= 1;
+    };
+    current_code = current_code / compressed_symbols;
     // undo last increment
     current_code -= 1;
     // assert last code assigned is the all-ones max-length code:
+    if( 2 == compressed_symbols ){
     assert( current_code == ((1<<max_canonical_length) - 1) );
+    };
+    // assert( [FIXME:] == current_code )
     assert(0);
 }
 
