@@ -117,6 +117,7 @@ into 2 or more separate files:
 * decompression-only library
 * compression-only library
 * usage example, which also stress-tests those libraries
+FIXME: explicitly mark functions only used internally with "static".
 
 FUTURE:
 make this an easily-usable library;
@@ -128,6 +129,7 @@ http://cbloomrants.blogspot.com/2015/09/library-writing-realizations.html
 Currently this implementation
 never uses dynamic allocation.
 Or C99-style "variable-length arrays".
+(Except we do use "length, table[length]" in the parameter list of some functions).
 So we never have to worry about
 garbage collection / memory fragmentation
 memory leakage / etc.
@@ -283,6 +285,21 @@ FUTURE:
 consider using
 https://en.wikipedia.org/wiki/C_data_types#Fixed-width_integer_types
 */
+
+/*
+NUM_ELEM finds the number
+of elements of an array defined in the *same* function.
+Alas,
+it doesn't work inside
+a function that accepts an array parameter
+, so
+a function that accepts an array parameter
+should also accept a length-of-that-array parameter.
+see
+https://en.wikibooks.org/wiki/C_Programming/Pointers_and_arrays
+for detils and limitations.
+*/
+#define NUM_ELEM(x) (sizeof (x) / sizeof (*(x)))
 
 // integer min and max apparently not yet in standard libraries
 // https://stackoverflow.com/questions/3437404/min-and-max-in-c
@@ -1175,21 +1192,89 @@ load_more_text(FILE * in, const size_t bufsize, char * buffer){
     return -1;
 }
 
+int
+count_nonzero_items(
+    const int array_length,
+    const int a[array_length]
+){
+    int count = 0;
+    for(int i=0; i<array_length; i++){
+        bool is_zero = (0 == a[i]);
+        if(!is_zero){
+            count++;
+        };
+    };
+    return count;
+}
 
 // Similar to
 //   #include <math.h>
 //   double pow(double base, double exponent);
 // but with only integer values:
+// inspired by
+// https://stackoverflow.com/questions/213042/how-do-you-do-exponentiation-in-c
 int power(const int base, const int exp){
     assert(0 <= exp);
     if(0 == exp){
         return 1;
-    }else if(exp & 2){
+    }else if(exp & 1){
         return base * power(base, exp - 1);
     }else{
-        int temp = power(base, exp / 2);
+        int temp = power(base, exp >> 1);
         return temp * temp;
     };
+}
+
+// find maximum value in array
+int array_max(
+        const int max_symbol_value,
+        const int canonical_lengths[max_symbol_value+1]
+    ){
+    int max_canonical_length = 0;
+    const int debug = 1;
+    for(int i=0; i<max_symbol_value; i++){
+        if(debug){
+            if( canonical_lengths[i] < 0 ){
+                printf(
+                    "unexpected length: i = %i; canonical_length[i] = %i \n",
+                    i, canonical_lengths[i]
+                    );
+            };
+        };
+        assert( canonical_lengths[i] >= 0 );
+        max_canonical_length = imax(
+                max_canonical_length,
+                canonical_lengths[i]
+                );
+    }
+    return max_canonical_length;
+}
+// find minimim non-zero value in array
+int array_min(
+        const int max_symbol_value,
+        const int canonical_lengths[max_symbol_value+1]
+    ){
+    int min_canonical_length = 300;
+    const int debug = 1;
+    for(int i=0; i<max_symbol_value; i++){
+        if(debug){
+            if( canonical_lengths[i] < 0 ){
+                printf(
+                    "unexpected length: i = %i; canonical_length[i] = %i \n",
+                    i, canonical_lengths[i]
+                    );
+            };
+        };
+        assert( canonical_lengths[i] >= 0 );
+        // the min canonical length that is not zero.
+        if(0 != canonical_lengths[i]){
+            min_canonical_length = imin(
+                min_canonical_length,
+                canonical_lengths[i]
+                );
+        };
+    }
+    return min_canonical_length;
 }
 
 
@@ -1221,31 +1306,8 @@ convert_lengths_to_encode_table(
 
     assert(max_symbol_value);
     assert(compressed_symbols);
-    int max_canonical_length = 0;
-    int min_canonical_length = 300;
-    for(int i=0; i<max_symbol_value; i++){
-        if(debug){
-            if( canonical_lengths[i] < 0 ){
-                printf(
-                    "unexpected length: i = %i; canonical_length[i] = %i \n",
-                    i, canonical_lengths[i]
-                    );
-            };
-        };
-        assert( canonical_lengths[i] >= 0 );
-        max_canonical_length = imax(
-                max_canonical_length,
-                canonical_lengths[i]
-                );
-        // [FIXME:]
-        // the min canonical length that is not zero.
-        if(0 != canonical_lengths[i]){
-            min_canonical_length = imin(
-                min_canonical_length,
-                canonical_lengths[i]
-                );
-        };
-    }
+    const int max_canonical_length = array_max( max_symbol_value, canonical_lengths );
+    const int min_canonical_length = array_min( max_symbol_value, canonical_lengths );
     // FUTURE: need to allow longer lengths
     // if we have huge Huffman tables.
     assert(max_canonical_length < 16);
@@ -1274,6 +1336,28 @@ convert_lengths_to_encode_table(
     // one leaf labeled with the all-ones code
     // and
     // one leaf labeled with the all-zeros code.
+    //
+    // A complete n_ary tree
+    // with n = compressed_symbols
+    // has 1 more than a multiple of (n-1) leaves.
+    // Proof:
+    // starting from a tree of 1 leaf,
+    // any complete n_ary tree can be generated
+    // by iteratively
+    // picking some leaf and replacing that leaf
+    // with an internal node
+    // linked to n leaves, which gives
+    // a net addition of (n-1) leaves.
+    // David Huffman's original paper, if DAV remembers correctly,
+    // points out that if we don't actually *have*
+    // a full 1 + k*(n-1) symbols,
+    // we may need some "dummy" leaves that don't really exist
+    // equal in length to the least-frequent symbol that does exist.
+    // The number of dummy symbols we need is d,
+    // 0 <= d < (n-1).
+    // So a binary tree never needs dummy symbols,
+    // a trinary tree may need 1 dummy symbol (or may not need any),
+    // a 5-ary tree may need 0 to 3 dummy symbols, etc.
     //
     // There seem to be 2 slightly different definitions:
     // (both have exactly the same length
@@ -1367,11 +1451,11 @@ convert_lengths_to_encode_table(
                 if(2 == compressed_symbols){
                 assert( current_code < (1<<(current_length + 1)) );
                 };
-                // assert( current_code < [FIXME:]
+                assert( current_code < power(compressed_symbols, current_length+1) );
                 encode_length_table[i] = current_length;
                 encode_value_table[i] = current_code;
                 if(debug){
-                    printf("Assigning i=%i to code 0x%x.\n", i, current_code);
+                    printf("Assigning i=%i to code 0x%x == %i.\n", i, current_code, current_code);
                 };
                 current_code += 1; // increment code.
             };
@@ -1392,12 +1476,33 @@ convert_lengths_to_encode_table(
     current_code = current_code / compressed_symbols;
     // undo last increment
     current_code -= 1;
+    const int max_actual_code = current_code;
     // assert last code assigned is the all-ones max-length code:
+    const int max_possible_code = power(compressed_symbols, max_canonical_length) - 1;
+    const int dummy_symbols = max_possible_code - max_actual_code;
     if( 2 == compressed_symbols ){
-    assert( current_code == ((1<<max_canonical_length) - 1) );
+        assert( ((1<<max_canonical_length) - 1) == current_code );
+        assert( 0 == dummy_symbols );
     };
-    // assert( [FIXME:] == current_code )
-    assert(0);
+    if( 3 == compressed_symbols ){
+        int nonzero_symbols = count_nonzero_items( max_symbol_value, canonical_lengths );
+        bool odd = (nonzero_symbols & 1);
+        bool even = !odd;
+        if(odd){
+            assert( 0 == dummy_symbols );
+        };
+        if(even){
+            assert( 1 == dummy_symbols );
+        };
+    };
+    if(debug){
+        printf( " compressed_symbols = %i, max_canonical_length = %i \n", compressed_symbols, max_canonical_length);
+        printf( " compressed_symbols ** max_canonical_length - 1 = %i \n",  max_possible_code);
+        printf( " max_actual_code = %i \n",  max_actual_code);
+        printf( " dummy_symbols = %i \n",  dummy_symbols );
+    }
+    assert( 0 <= dummy_symbols );
+    assert( dummy_symbols < (compressed_symbols - 1) );
 }
 
 
@@ -1495,6 +1600,7 @@ compress(
         printf("# %d : compressed_symbols.\n", compressed_symbols );
         // FIXME:
         printf("# header ....\n");
+        // FIXME: perhaps make d a simple integer index *into* the compressed_text[] array
         char * d = compressed_text;
         char * type = "\nX"; // Huffman table type 1 (human-readable)
         // FUTURE: there's probably a better way
@@ -2210,7 +2316,68 @@ length 3:  Z k
     }
 }
 
+// return 1 (True) if the arrays are equal.
+bool
+arrays_equal(
+    int array_length,
+    int a[array_length],
+    int b[array_length]
+){
+    for(int i=0; i<array_length; i++){
+        bool same = (a[i] == b[i]);
+        if(!same){
+            printf(
+                "First difference: a[%i]=%i ; b[%i]=%i.\n", 
+                i, a[i], i, b[i]
+                );
+            return false;
+        };
+    };
+    return true;
+}
+
+void
+test_convert_lengths_to_encode_table(void){
+    int max_symbol_value = 8;
+    int length_table[80] = {0, 1, 1, 1};
+    int encode_length_table[80] = {0};
+    unsigned int encode_value_table[80] = {0};
+    /*
+    int length_table_length = NUM_ELEM( length_table );
+    */
+    convert_lengths_to_encode_table(
+        max_symbol_value,
+        length_table,
+        3, // trinary output
+        encode_length_table,
+        encode_value_table
+        );
+    if(1){
+        assert( arrays_equal( (max_symbol_value+1), length_table, encode_length_table ) );
+        unsigned int expected_value_table[80] = {0, 1, 2, 3};
+        assert( arrays_equal( 80, (int *)expected_value_table, (int *)encode_value_table ) );
+    };
+    length_table[4] = 1;
+    length_table[4] = 1;
+    convert_lengths_to_encode_table(
+        max_symbol_value,
+        length_table,
+        3, // trinary output
+        encode_length_table,
+        encode_value_table
+        );
+    if(1){
+        assert( arrays_equal( (max_symbol_value+1), length_table, encode_length_table ) );
+        unsigned int expected_value_table[80] = {0, 1, 2, 3};
+        assert( arrays_equal( 80, (int *)expected_value_table, (int *)encode_value_table ) );
+    };
+
+
+
+}
+
 void run_tests(void){
+    test_convert_lengths_to_encode_table();
     test_summarize_tree_with_lengths();
     test_setup_nodes();
     test_next_block();
