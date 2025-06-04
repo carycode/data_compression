@@ -110,6 +110,26 @@ as recommended by
 https://neovim.io/doc/user/dev_style.html
 
 
+Source code style:
+DAV is a big fan of
+4-space indents (no tabs)
+(as per
+"PEP 8 – Style Guide for Python Code"
+https://peps.python.org/pep-0008/
+)
+and
+else with ears ("}else{").
+Consider *looking* at the recommendations
+of a pretty printer / beautifier tool like "indent",
+but don't blindly apply it
+(as per
+https://www.cs.umd.edu/~nelson/classes/resources/cstyleguide/
+which recommends
+"Avoid using the indent command as a last step; it can undo any manual beautification."
+).
+
+
+
 
 FUTURE:
 perhaps break up this monolithic file
@@ -1478,14 +1498,19 @@ convert_lengths_to_encode_table(
     current_code -= 1;
     const int max_actual_code = current_code;
     // assert last code assigned is the all-ones max-length code:
+    // (or the all-max-digit max-length code)
     const int max_possible_code = power(compressed_symbols, max_canonical_length) - 1;
     const int dummy_symbols = max_possible_code - max_actual_code;
-    if( 2 == compressed_symbols ){
+    if( debug && ( 2 == compressed_symbols )){
         assert( ((1<<max_canonical_length) - 1) == current_code );
         assert( 0 == dummy_symbols );
     };
-    if( 3 == compressed_symbols ){
+    if( debug && ( 3 == compressed_symbols )){
         int nonzero_symbols = count_nonzero_items( max_symbol_value, canonical_lengths );
+        printf( "nonzero symbols: %i\n", nonzero_symbols );
+        printf( "max_canonical_length: %i\n", max_canonical_length );
+        printf( "max_possible_code: %i\n", max_possible_code );
+        printf( "max_actual_code: %i\n", max_actual_code );
         bool odd = (nonzero_symbols & 1);
         bool even = !odd;
         if(odd){
@@ -2316,6 +2341,83 @@ length 3:  Z k
     }
 }
 
+
+void
+short_test_next_block(void){
+    printf("# short_test_next_block ...\n");
+    // FIXME: use a larger buffer,
+    // perhaps with calloc() or realloc() or both?
+    const size_t bufsize = 65000;
+    char original_text[65000+1] =
+        ""
+"/* n_ary_huffman.c"
+"2021-10-25: started by David Cary"
+        "";
+    size_t original_length = strlen( original_text );
+
+    // FIXME: support arbitrary number of symbols.
+    const int max_symbol_value = 258;
+    int symbol_frequencies[max_symbol_value+1];
+    symbol_frequencies[258] = 0xBEEF;
+    printf("# finding histogram.\n");
+    histogram( original_text, max_symbol_value, symbol_frequencies );
+    assert( 0 == symbol_frequencies[258] );
+    int compressed_symbols = 3; // 2 for binary, 3 for trinary, etc.
+    assert(compressed_symbols);
+    // FUTURE: length-limited Huffman?
+
+    printf("# finding canonical lengths.\n");
+    int canonical_lengths[max_symbol_value+1];
+    for( int i=0; i<(max_symbol_value+1); i++){
+        canonical_lengths[i] = 0;
+    };
+    assert(0 == canonical_lengths[0]);
+    // int canonical_lengths[nonzero_text_symbols] = {};
+    huffman(
+        max_symbol_value, symbol_frequencies,
+        compressed_symbols,
+        canonical_lengths
+    );
+    printf("# now we have the canonical lengths ...\n");
+    debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
+    int compressed_data_size = 
+    find_compressed_data_size(
+        max_symbol_value,
+        symbol_frequencies,
+        canonical_lengths,
+        compressed_symbols
+        );
+    printf("# compressed_data_size, not including header: %i symbols\n",
+        compressed_data_size
+        );
+    test_various_table_representations(
+        max_symbol_value,
+        symbol_frequencies,
+        canonical_lengths
+    );
+    printf("# compressing text...\n");
+    char compressed_text[bufsize+1];
+    compress(
+        max_symbol_value, canonical_lengths, compressed_symbols,
+        bufsize,
+        original_length,
+        original_text,
+        compressed_text
+    );
+    printf("# decompressing text.\n");
+    char decompressed_text[bufsize+1];
+    decompress( bufsize, compressed_text, bufsize, decompressed_text );
+    size_t decompressed_length = strlen( decompressed_text );
+    assert( original_length == decompressed_length );
+    if( memcmp( original_text, decompressed_text, original_length ) ){
+        printf("Error: decompressed text doesn't match original text.\n");
+        printf("[%s] original\n", original_text);
+        printf("[%s] decompressed\n", decompressed_text);
+    }else{
+        printf("Successful test.\n");
+    }
+}
+
 // return 1 (True) if the arrays are equal.
 bool
 arrays_equal(
@@ -2338,45 +2440,78 @@ arrays_equal(
 
 void
 test_convert_lengths_to_encode_table(void){
-    int max_symbol_value = 8;
-    int length_table[80] = {0, 1, 1, 1};
+    int max_symbol_value = 20;
     int encode_length_table[80] = {0};
     unsigned int encode_value_table[80] = {0};
-    /*
-    int length_table_length = NUM_ELEM( length_table );
-    */
-    convert_lengths_to_encode_table(
-        max_symbol_value,
-        length_table,
-        3, // trinary output
-        encode_length_table,
-        encode_value_table
-        );
     if(1){
+        /*
+        int length_table_length = NUM_ELEM( length_table );
+        */
+        int length_table[80] = {0, 0, 1, 1, 1};
+        convert_lengths_to_encode_table(
+            max_symbol_value,
+            length_table,
+            3, // trinary output
+            encode_length_table,
+            encode_value_table
+            );
         assert( arrays_equal( (max_symbol_value+1), length_table, encode_length_table ) );
-        unsigned int expected_value_table[80] = {0, 1, 2, 3};
+        int expected_length_table[80] = {0, 0, 1, 1, 1};
+        int expected_value_table[80] = {0, 0, 0, 1, 2}; // trinary
+        assert( arrays_equal( 80, expected_value_table, (int *)encode_value_table ) );
+        assert( arrays_equal( 80, expected_length_table, encode_length_table ) );
+    };
+    if(1){
+        // test with 8 equal-frequency items,
+        // which (in trinary) should lead to all items of length 2
+        // (and 1 unused "dummy" codeword).
+        int length_table[80] = {0,0,
+            2, 2, 2, 2,
+            2, 2, 2, 2,
+        };
+        convert_lengths_to_encode_table(
+            max_symbol_value,
+            length_table,
+            3, // trinary output
+            encode_length_table,
+            encode_value_table
+            );
+        assert( arrays_equal( (max_symbol_value+1), length_table, encode_length_table ) );
+        unsigned int expected_value_table[80] = {0,0,
+            0, 1, 2, 3,
+            4, 5, 6, 7,
+        };
         assert( arrays_equal( 80, (int *)expected_value_table, (int *)encode_value_table ) );
     };
-    length_table[4] = 1;
-    length_table[4] = 1;
-    convert_lengths_to_encode_table(
-        max_symbol_value,
-        length_table,
-        3, // trinary output
-        encode_length_table,
-        encode_value_table
-        );
     if(1){
+        // test with 9 equal-frequency items,
+        // which (in trinary) should lead to all items of length 2
+        // (and zero unused "dummy" codewords).
+        int length_table[80] = {0,0,
+            2, 2, 2, 2,
+            2, 2, 2, 2,
+            2,
+        };
+        convert_lengths_to_encode_table(
+            max_symbol_value,
+            length_table,
+            3, // trinary output
+            encode_length_table,
+            encode_value_table
+            );
         assert( arrays_equal( (max_symbol_value+1), length_table, encode_length_table ) );
-        unsigned int expected_value_table[80] = {0, 1, 2, 3};
+        unsigned int expected_value_table[80] = {0,0,
+            0, 1, 2, 3,
+            4, 5, 6, 7,
+            8
+        };
         assert( arrays_equal( 80, (int *)expected_value_table, (int *)encode_value_table ) );
     };
-
-
 
 }
 
 void run_tests(void){
+    short_test_next_block();
     test_convert_lengths_to_encode_table();
     test_summarize_tree_with_lengths();
     test_setup_nodes();
