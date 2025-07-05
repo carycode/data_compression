@@ -77,6 +77,13 @@ as internal debugging comments,
 intended to be ignored
 by other programs downstream in the pipeline.
 
+FIXME:
+Add a
+"Quick Start Recipe"
+analogous to the one at
+https://github.com/ubf/ubf
+to my README file.
+
 FUTURE: length-limited Huffman?
 
 FUTURE: use size_t rather than int for array lengths?
@@ -129,6 +136,28 @@ which recommends
 ).
 
 
+FUTURE:
+consider using length-limited Huffman codes,
+there's a nice description of
+several length-limited Huffman algorithms,
+including
+the package-merge algorithm,
+in
+"Length-Limited Prefix Codes"
+by Stephan Brumme
+https://create.stephan-brumme.com/length-limited-prefix-codes/
+Another description of the package-merge algorithm at
+"Length-Limited Huffman Codes: How to create Huffman codes under a size constraint"
+by Hayden Sather
+https://experiencestack.co/length-limited-huffman-codes-21971f021d43
+2022
+
+FUTURE:
+consider using the "shared interface"
+described in
+"Length-Limited Prefix Codes"
+by Stephan Brumme
+https://create.stephan-brumme.com/length-limited-prefix-codes/
 
 
 FUTURE:
@@ -787,6 +816,55 @@ setup_nodes(
     assert( 0 == list[300].count );
 }
 
+/*
+
+DAV:
+As David Huffman pointed out,
+if we have 3 or more output symbols
+(i.e., trinary Huffman compression or n-ary Huffman compression)
+we may need dummy symbols.
+
+DAV:
+Perhaps the simplest case where it's clear we need dummy symbols:
+If we have
+3 compressed symbols (trinary Huffman)
+and we have 4 unique input symbols,
+if we merge the 3 lowest-frequency symbols
+we always (no matter the input symbol counts) get
+a tree with this shape:
+
+         root  (bad: not optimum!)
+       /   |  \
+    / | \  d  (unused)
+    a b  c
+
+It's always better to use
+a tree with this shape:
+
+         root  (good! optimum shaped tree)
+       /   |  \
+    / | \  c   d
+    a b (dummy unused)
+
+Another example:
+
+With 4-ary Huffman,
+if we have 5 unique input symbols we need 2 dummy symbols:
+
+                     root (good! optimum shaped tree).
+                  -------
+                 /  | |  \
+          -------   c d   e
+         /  | |  \
+    (dummy) a b (dummy)
+
+FUTURE:
+consider posting what I've learned about ternary and general n-ary Huffman
+to
+https://cs.stackexchange.com/questions/40833/the-algorithm-yields-optimal-ternary-codes
+
+*/
+
 void
 generate_huffman_tree(
     // const int text_symbols,
@@ -832,6 +910,9 @@ generate_huffman_tree(
     if( 3 == compressed_symbols ){
         //trinary
         const int expected_dummy = 1 - (nonzero_text_symbols & 1);
+        printf("nonzero_text_symbols: %i\n", nonzero_text_symbols);
+        printf("compressed_symbols: %i\n", compressed_symbols);
+        printf("dummy_nodes: %i\n", dummy_nodes);
         assert( expected_dummy == dummy_nodes );
     };
     assert( dummy_nodes < (compressed_symbols - 1) );
@@ -2012,6 +2093,303 @@ https://stackoverflow.com/questions/4241545/c-switch-case-curly-braces-after-eve
     return length;
 }
 
+/*
+"Practical Huffman coding: Maximum length of Huffman symbol"
+by Michael Schindler
+http://www.compressconsult.com/huffman/#maxlength
+mentions two independent worst-case Huffman lengths:
+<q>
+No huffman code can be longer than alphabetsize-1. Proof: it is impossible to construct a binary tree with N nodes and more than N-1 levels.
+</q>
+But the worst-case Huffman length may be much shorter than that
+if you limit the number of symbols in a block:
+<q>
+the sequence is as follows (the samples include the fake samples to give each symbol a nonzero probability!):
+
+    #samples 	maximum codelength
+    1....2 	1
+    3....4 	2
+    5....7 	3
+    8...12 	4
+    13...20 	5
+    #samples 	maximum codelength
+    21...33 	6
+    34...54 	7
+    55...88 	8
+    89..143 	9
+    144..232 	10
+
+the width of each range is the lower end of the previous range, so the next would be: 233 to 233+144-1=376 samples give a maximum codelength of 11.
+
+An example for a tree with depth 6 and 21 samples (count for each symbol given) would be ((((((1,1),1),2),3),5),8). (oh no - Fibonacci numbers again :) 
+</q>
+
+
+https://stackoverflow.com/questions/57036603/in-zlib-what-happen-when-the-huffman-code-lengths-for-the-alphabets-exceed-maxim
+mentions that
+<q>
+zlib normally limits a deflate block to 16384 symbols. For that number, the maximum Huffman code length is 19. That comes from a Fibonacci-like (Lucas) sequence of probabilities, not your powers of two. (Left as an exercise for the reader.)
+</q>
+
+
+"Maximum size of Huffman codes for an alphabet containing 256 letters"
+https://cs.stackexchange.com/questions/75542/maximum-size-of-huffman-codes-for-an-alphabet-containing-256-letters
+mentions
+<q>
+
+In theory, 256 characters can have probabilities
+
+    2^−1, 2^−2, ..., 2^−255, 2^−255
+
+(yes, the last one is 2^−255, not 2^−256
+), so there could be two codes of 255 bits.
+
+In practice,
+if you compress let's say a document of 1 Gigabyte,
+no character can have a probability less than 2^−30,
+so the maximum length would be 30 bits.
+
+And again in practice,
+you can
+make a decoder faster if it has a limited maximum number of bits, say 14.
+That's called "length limited Huffman codes".
+There's a rather complicated algorithm
+that can be given the maximum length l of any code that you want to achieve
+(obviously ≥ 8 for 256 codes),
+and it will calculate the optimal codes under that restriction.
+Obviously not optimal globally,
+but usually very close,
+if you limit the length to 14 bits, for example. 
+
+</q>
+
+
+DAV:
+However it is unclear if these are using a "good algorithm"
+(that, whenever we have the option -- there's a tie,
+we choose to merge leaves or shallow branches rather than deep branches)
+or a "perverse algorithm"
+(that, whenever we have the option -- there's a tie,
+we choose to merge the deepest branch rather than leaves or shallow branches
+).
+Both the "good" and the "perverse" algorithms compress the data
+into the same total number of bits ...
+(a proof of this is requested at
+"Average codeword length is the same in any Huffman encoding schemes"
+https://math.stackexchange.com/questions/2661204/average-codeword-length-is-the-same-in-any-huffman-encoding-schemes
+).
+
+"Two Huffman trees for one corpus. How is it possible?"
+https://math.stackexchange.com/questions/705521/two-huffman-trees-for-one-corpus-how-is-it-possible
+also points out that
+that not only do we get different Huffman codes
+by randomly swapping internal nodes left/right (1/0),
+but we can get different *shape* Huffman trees.
+
+
+DAV:
+In either case, the max-depth tree looks the same:
+
+             /\
+            /\ L
+           /\ L
+       ....  L
+      /\
+     /\ L
+    /\ L
+    L L
+
+The perverse algorithm allows:
+
+           ....
+            24
+           / \
+          15  \
+         / \   L count=9
+        9   \
+       / \   L count=6
+       6  \
+      / \  L count=3 (tied for the (1(1:1)) )
+      3  \
+     / \  L count=2 (tied for the 1:1)
+     2  \
+    / \  L count=1
+    L L 
+    1 1
+
+The "good" algorithm allows:
+
+           ....
+            28
+           / \
+          17  \
+         / \   L count=11
+        10  \
+       / \   L count=7
+       6  \
+      / \  L count=4
+      3  \
+     / \  L count=3 (1 more than the (1(1:1)) )
+     2  \
+    / \  L count=1
+    L L 
+    1 1
+
+
+
+
+
+
+
+Other things related to maximum Huffman length:
+
+
+https://math.stackexchange.com/questions/1635832/word-lengths-of-optimal-binary-code
+
+https://math.stackexchange.com/questions/2661166/maximimze-a-huffman-code-length
+
+"How many bits does the longest encoded symbol have, using an Huffman coding on a given probability distribution?"
+https://math.stackexchange.com/questions/835451/how-many-bits-does-the-longest-encoded-symbol-have-using-an-huffman-coding-on-a
+
+
+"On the Maximum Length of Huffman Codes"
+by Michael Buro
+https://skatgame.net/mburo/ps/huff.pdf
+
+*/
+
+/*
+Other things related to (non-binary) n-ary Huffman codes:
+
+https://math.stackexchange.com/questions/653112/encoding-a-channel-with-huffman-code
+discusses trinary Huffman,
+and the necessity of adding dummy symbols.
+
+
+
+[data compression: word-oriented Huffman]
+
+"Huffman-coding English words"
+by Project Nayuki
+https://www.nayuki.io/page/huffman-coding-english-words
+DAV: has some fun experiments;
+for human-readability, it compressed each English *word*
+(word-oriented Huffman)
+into a "codeword" made only of letters
+using 52-ary Huffman coding (!)
+which it points out is "wildly inefficient".
+symbols are passed through unchanged.
+Also,
+it points out that
+"Some words appear in the text only once (hapax legomena)."
+and rather than include them in the english_word:codeword table
+at the beginning of the compressed file,
+it spells them out one letter at a time.
+The individual *letters* are often encoded as multi-letter Huffman-compressed *words*,
+because the frequency used is (correctly)
+counted as only the times the letter is used "by itself",
+and not inside a (non-hapax-legomena) compressed word.
+DAV wonders if perhaps we could make this
+even more human-readable
+by noticing the surprisingly often case
+where a 2-letter English "word" (such as "it")
+is encoded into a 2-letter Huffman-compressed codeword,
+and swapping things around
+so that that 2-letter English word
+is represented by itself in the compressed file.
+DAV found this Project Nayuki Huffman page from a link on
+"What Is Huffman Coding? (baseclass.io)"
+https://news.ycombinator.com/item?id=26203282
+DAV:
+It's tempting to "save" all the space
+in the initial dictionary of English words to Huffman codes
+by reserving some special symbol
+and spelling out the word the first time it is used --
+but it seems likely that the amount of space it takes
+to spell out that word
+the first time it is used
+is just as much as
+spelling out that word
+in the initial dictionary,
+so no net improvement in compression.
+(It *does* improve latency ...)
+
+
+DAV:
+perhaps it would be fun to do something similar
+for short text data compression --
+perhaps format-preserving compressing fields in CSV files,
+where we are careful to maintain the structure of the CSV files
+by always preserving the commas and newlines unchanged
+and avoiding
+commas, newlines, or double-quotes
+in the compressed fields ...
+...
+If we allow, say,
+base64URL character set in the fields,
+the simplest would seem to be
+(as Nayuki does)
+a 64-ary Huffman compression,
+but
+(as Nayuki points out)
+that is likely "wildly inefficient".
+Perhaps it would be more efficient to
+use (octal) 8-ary Huffman compression
+and pack 2 octal digits per base64URL character
+(and somehow "round up"
+each field that packs into an odd number
+of octal digits
+)
+or use 4-ary or 2-ary or binary Huffman compression,
+even though that "throws away"
+some padding bits at the end of each field.
+Or perhaps somehow
+"re-use" some of those padding bits?
+Say, we use (octal) 8-ary Huffman compression.
+And somehow (unclear if this is reasonable)
+every codeword uses at least 2 octal digits.
+Then when decoding any one *row* of the CSV file,
+with several compressed 
+fields,
+if we hit the comma at the end of the field
+before we hit the end of a codeword,
+we preserve those digits
+and use them at the beginning of the *next* compressed field.
+(However, when we hit the newline
+at the end of the record,
+then we flush those padding digits
+and start fresh on the next row.
+).
+It's unclear
+how to stick in the Huffman header "dictionary"
+while still preserving the CSV format.
+
+DAV:
+perhaps it would be fun to do something similar
+for short text data compression --
+perhaps format-preserving compressing fields in
+text, perhaps even the same Alice in Wonderland benchmark.
+If the compressed payload *always* alternates between
+* base64 digits representing compressed *words*
+* non-base-64 spaces, punctuation, etc. passed through unchanged
+then (as Nayuki points out)
+we don't really *need* the prefix property,
+so perhaps we can use that to get slightly more compression.
+(Perhaps one special "escape" word,
+followed by a space,
+to indicate
+"a literal word follows"
+for hapax legomena
+that's not in the dictionary.
+).
+
+
+*/
+
+
+
+
+
 int
 test_various_table_representations(
         int max_symbol_value,
@@ -2282,6 +2660,7 @@ length 3:  Z k
     // FIXME: support arbitrary number of symbols.
     const int max_symbol_value = 258;
     int symbol_frequencies[max_symbol_value+1];
+    symbol_frequencies[258] = 0xBEEF; // for debugging: canary sentinel to test zeroing.
     printf("# finding histogram.\n");
     histogram( original_text, max_symbol_value, symbol_frequencies );
     assert( 0 == symbol_frequencies[258] );
@@ -2358,7 +2737,7 @@ short_test_next_block(void){
     // FIXME: support arbitrary number of symbols.
     const int max_symbol_value = 258;
     int symbol_frequencies[max_symbol_value+1];
-    symbol_frequencies[258] = 0xBEEF;
+    symbol_frequencies[258] = 0xBEEF; // for debugging: canary sentinel to test zeroing.
     printf("# finding histogram.\n");
     histogram( original_text, max_symbol_value, symbol_frequencies );
     assert( 0 == symbol_frequencies[258] );
@@ -2380,6 +2759,7 @@ short_test_next_block(void){
     );
     printf("# now we have the canonical lengths ...\n");
     debug_print_table( max_symbol_value, canonical_lengths, compressed_symbols );
+    assert(0);
     int compressed_data_size = 
     find_compressed_data_size(
         max_symbol_value,
