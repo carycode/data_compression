@@ -1,6 +1,10 @@
 
 /* n_ary_huffman.c
-WARNING: version  0.2021.00.01-alpha : extremely rough draft.
+WARNING: extremely rough draft.
+*/
+const char version[] = "0.2026.00.01-alpha";
+/*
+2026-03-28: tweaks by David Cary
 2021-10-25: started by David Cary
 
 A few experiments with
@@ -178,6 +182,7 @@ http://cbloomrants.blogspot.com/2015/09/library-writing-realizations.html
 Currently this implementation
 never uses dynamic allocation.
 Or C99-style "variable-length arrays".
+(an array whose size depends on a variable passed in to the function).
 (Except we do use "length, table[length]" in the parameter list of some functions).
 So we never have to worry about
 garbage collection / memory fragmentation
@@ -863,6 +868,70 @@ consider posting what I've learned about ternary and general n-ary Huffman
 to
 https://cs.stackexchange.com/questions/40833/the-algorithm-yields-optimal-ternary-codes
 
+In general,
+a tree with B-way branching (B compressed symbols)
+and N non-leaf nodes (i.e., internal nodes and the root node)
+always has some L leafs (including the dummy symbols, which are leafs),
+where L = N*(B-1) + 1.
+(For example, with N=2,
+trinary trees have L = 2*(3-1) +  1 = 5 leaves, and
+nonary trees have L = 2*(9-1) + 1 = 17 leaves
+).
+L includes the dummy symbols:
+L = nonzero_text_symbols + dummy_nodes
+The actual number of "true" nondummy leafs is ...
+L - (B-1) < nonzero_text_symbols <= L
+Given nonzero_text_symbols,
+DAV derived this formula:
+we can calculate the (minimum) number of dummy nodes D by:
+    D = (B-2) - ((nonzero_text_symbols - 2) MOD (B-1))
+
+For example, with base-4 trees,
+    nonzero_text_symbols
+        dummy_nodes
+    4   0
+    5   2
+    6   1
+    7   0
+    8   2
+    9   1
+    10  0
+    11  2
+    12  1
+    13  0
+    N   2 - ((N-1) mod 3)
+
+For example, with nonary,
+    nonzero_text_symbols
+        dummy_nodes
+    9   0
+    10  7
+    11  6
+    12  5
+    13  4
+    14  3
+    15  2
+    16  1
+    17  0
+    18  7
+    N   7 - ((N-1) mod 8)
+
+For example, with decimal,
+    nonzero_text_symbols
+        dummy_nodes
+    10  0
+    11  8
+    12  7
+    13  6
+    14  5
+    15  4
+    16  3
+    17  2
+    18  1
+    19  0
+    20  8
+    N   8 - ((N-1) mod 9)
+
 */
 
 void
@@ -1163,7 +1232,7 @@ huffman(
     const int max_leaf_value,
     const int symbol_frequencies[max_leaf_value+1],
     const int compressed_symbols,
-    int lengths[max_leaf_value+1]
+    int lengths[max_leaf_value+1] // output-only
 ){
     const int list_length = (2*max_leaf_value);
     assert(1 < compressed_symbols);
@@ -1986,7 +2055,7 @@ practically equal-frequency --
 hopefully the bits we lose using non-perfect Huffman lengths
 are made up by requiring a much shorter header table).
 (b) use less space in Huffman tables
-by *remembering* the last N non-idendical Huffman tables
+by *remembering* the last N non-identical Huffman tables
 and then
 occasionally starting a block
 with something that tells the decoder
@@ -2890,7 +2959,68 @@ test_convert_lengths_to_encode_table(void){
 
 }
 
+void debug_lengths(
+    int max_leaf_value, 
+    const int lengths[max_leaf_value+1]
+    ){
+    for(int i=0; i<=max_leaf_value; i++){
+        printf("  i, length[i] \n");
+        if(0 != lengths[i]){
+            printf("  %d, %d\n", i, lengths[i]);
+        };
+    };
+}
+
+void test_huffman(void){
+    printf("Starting test_huffman()....\n");
+    const int max_leaf_value = 516;
+    int symbol_frequencies[max_leaf_value+1];
+    int lengths[max_leaf_value+1];
+    /*
+    test assertions for the specific case of
+    29 unique symbols actually used == nonzero_text_symbols
+    list_length: 516
+    max_leaf_value: 258
+    */
+    printf("  setting up test array....\n");
+    {
+        for( int i=0; i<=max_leaf_value; i++ ){
+            symbol_frequencies[ i ] = 0;
+        };
+    };
+    {
+        for( int i=0; i<29; i++ ){
+            symbol_frequencies[ i + 'A' ] = 1;
+        };
+    };
+    {
+
+        printf("testing trinary");
+        // compressed using trinary
+        huffman( 
+            max_leaf_value,
+            symbol_frequencies,
+            3,
+            lengths
+            );
+    };
+    debug_lengths(max_leaf_value, lengths);
+    {
+        printf("testing nonary");
+        // compressed using base-9 nonary
+        huffman( 
+            max_leaf_value,
+            symbol_frequencies,
+            3,
+            lengths
+            );
+    };
+    debug_lengths(max_leaf_value, lengths);
+    printf("Done test_huffman().\n");
+}
+
 void run_tests(void){
+    test_huffman();
     short_test_next_block();
     test_convert_lengths_to_encode_table();
     test_summarize_tree_with_lengths();
