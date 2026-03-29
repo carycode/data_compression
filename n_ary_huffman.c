@@ -967,8 +967,8 @@ generate_huffman_tree(
     };
 
     int dummy_nodes =
-        (compressed_symbols - 1) -
-        ((nonzero_text_symbols - 1) %
+        (compressed_symbols - 2) -
+        ((nonzero_text_symbols - 2) %
         (compressed_symbols - 1));
     
     printf("# %d : compressed symbols\n", compressed_symbols );
@@ -2995,7 +2995,7 @@ void test_huffman(void){
     };
     {
 
-        printf("testing trinary");
+        printf("testing trinary\n");
         // compressed using trinary
         huffman( 
             max_leaf_value,
@@ -3006,7 +3006,7 @@ void test_huffman(void){
     };
     debug_lengths(max_leaf_value, lengths);
     {
-        printf("testing nonary");
+        printf("testing nonary\n");
         // compressed using base-9 nonary
         huffman( 
             max_leaf_value,
