@@ -886,6 +886,22 @@ DAV derived this formula:
 we can calculate the (minimum) number of dummy nodes D by:
     D = (B-2) - ((nonzero_text_symbols - 2) MOD (B-1))
 
+DAV:
+The "MOD (B-1)" comes from the fact that
+every time we add an internal node,
+it adds B more leaves,
+but attaching that node to the pre-existing tree
+removes one node,
+a net of adding (B-1) leaves every time.
+The "(B-2)" comes from the fact that
+every internal node
+(except the root node)
+has at least 2 descendents
+(if it only had one,
+we could eliminate that internal node
+).
+So the max possible number of dummy nodes is B-2.
+
 For example, with base-4 trees,
     nonzero_text_symbols
         dummy_nodes
@@ -934,6 +950,33 @@ For example, with decimal,
 
 */
 
+int find_dummy_nodes(
+        int compressed_symbols,
+        int nonzero_text_symbols
+    ){
+    printf("# %d : compressed symbols\n", compressed_symbols );
+    int dummy_nodes =
+        (compressed_symbols - 2) -
+        ((nonzero_text_symbols - 2) %
+        (compressed_symbols - 1));
+    printf("# using %i dummy nodes.\n", dummy_nodes);
+    if( 2 == compressed_symbols ){
+        //binary
+        assert( 0 == dummy_nodes );
+    };
+    if( 3 == compressed_symbols ){
+        //trinary
+        const int expected_dummy = 1 - (nonzero_text_symbols & 1);
+        printf("nonzero_text_symbols: %i\n", nonzero_text_symbols);
+        printf("compressed_symbols: %i\n", compressed_symbols);
+        printf("dummy_nodes: %i\n", dummy_nodes);
+        assert( expected_dummy == dummy_nodes );
+    };
+    assert( dummy_nodes < (compressed_symbols - 1) );
+    assert( 0 <= dummy_nodes );
+    return dummy_nodes;
+}
+
 void
 generate_huffman_tree(
     // const int text_symbols,
@@ -966,26 +1009,11 @@ generate_huffman_tree(
         sorted_index[i] = i;
     };
 
-    int dummy_nodes =
-        (compressed_symbols - 2) -
-        ((nonzero_text_symbols - 2) %
-        (compressed_symbols - 1));
+    int dummy_nodes = find_dummy_nodes(
+        compressed_symbols,
+        nonzero_text_symbols
+        );
     
-    printf("# %d : compressed symbols\n", compressed_symbols );
-    if( 2 == compressed_symbols ){
-        //binary
-        assert( 0 == dummy_nodes );
-    };
-    if( 3 == compressed_symbols ){
-        //trinary
-        const int expected_dummy = 1 - (nonzero_text_symbols & 1);
-        printf("nonzero_text_symbols: %i\n", nonzero_text_symbols);
-        printf("compressed_symbols: %i\n", compressed_symbols);
-        printf("dummy_nodes: %i\n", dummy_nodes);
-        assert( expected_dummy == dummy_nodes );
-    };
-    assert( dummy_nodes < (compressed_symbols - 1) );
-    printf("# using %i dummy nodes.\n", dummy_nodes);
     printf("# max_leaf_value: %i\n", max_leaf_value);
     for(int i=(max_leaf_value+1); i<(max_leaf_value + 1 + dummy_nodes); i++){
         sorted_index[i] = i;
@@ -2973,7 +3001,7 @@ void debug_lengths(
 
 void test_huffman(void){
     printf("Starting test_huffman()....\n");
-    const int max_leaf_value = 516;
+    const int max_leaf_value = 258;
     int symbol_frequencies[max_leaf_value+1];
     int lengths[max_leaf_value+1];
     /*
@@ -3020,6 +3048,15 @@ void test_huffman(void){
 }
 
 void run_tests(void){
+    assert( 0 == find_dummy_nodes(4, 4) );
+    assert( 2 == find_dummy_nodes(4, 5) );
+    assert( 1 == find_dummy_nodes(4, 6) );
+    assert( 2 == find_dummy_nodes(4, 8) );
+    assert( 0 == find_dummy_nodes(9, 9) );
+    assert( 7 == find_dummy_nodes(9, 10) );
+    assert( 6 == find_dummy_nodes(9, 11) );
+    assert( 0 == find_dummy_nodes(10, 10) );
+    assert( 8 == find_dummy_nodes(10, 11) );
     test_huffman();
     short_test_next_block();
     test_convert_lengths_to_encode_table();
