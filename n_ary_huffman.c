@@ -4,6 +4,7 @@ WARNING: extremely rough draft.
 */
 const char version[] = "0.2026.00.01-alpha";
 /*
+2026-03-31: finally the "dummy nodes" calculation is correct.
 2026-03-28: tweaks by David Cary
 2021-10-25: started by David Cary
 
@@ -15,7 +16,10 @@ Many Huffman data compression algorithms
 and
 around 257 input symbols.
 (Often
+1 symbol: special end-of-section marker, plus
 256 symbols: all possible bytes
+)
+(
 DEFLATE has 288 symbols in its main Huffman tree:
 0..255: all possible literal bytes 0-255
 256: end-of-block symbol
@@ -638,6 +642,19 @@ at the beginning of the compressed block
 a little shorter.
 * Rather than a linear list, perhaps a priority heap?
 https://en.wikipedia.org/wiki/Partial_sorting
+** Rather than a standard binary priority heap,
+perhaps a min-max heap (double-ended priority queue) or an 8-way priority heap
+(even though I only need to find the N smallest-frequency items,
+and I don't ever find the largest-frequency item
+)
+because it's apparently somehow *faster* than a binary priority heap,
+according to
+Malte Skarupke
+"On Modern Hardware the Min-Max Heap beats a Binary Heap"
+https://probablydance.com/2020/08/31/on-modern-hardware-the-min-max-heap-beats-a-binary-heap/
+and also some of the comments to that blog seem to imply
+it's because it's effectively an 4-way priority heap,
+and speculate that 8-way priority heap may be even faster.
 * FUTURE: some faster sorted queue implementation?
 */
 static
@@ -702,8 +719,9 @@ partial_sort(
     );
     */
     printf("# sorting %i items...\n", max_node - min_active_node + 1);
-    assert( min_active_node < list_length );
+    assert( max_node < list_length );
     assert( min_active_node < max_node );
+    assert( 0 <= min_active_node );
     int total_swapped = 0;
     do{
         total_swapped = 0;
@@ -967,13 +985,14 @@ int find_dummy_nodes(
     if( 3 == compressed_symbols ){
         //trinary
         const int expected_dummy = 1 - (nonzero_text_symbols & 1);
-        printf("nonzero_text_symbols: %i\n", nonzero_text_symbols);
-        printf("compressed_symbols: %i\n", compressed_symbols);
-        printf("dummy_nodes: %i\n", dummy_nodes);
+        printf("# nonzero_text_symbols: %i\n", nonzero_text_symbols);
+        printf("# compressed_symbols: %i\n", compressed_symbols);
+        printf("# dummy_nodes: %i\n", dummy_nodes);
         assert( expected_dummy == dummy_nodes );
     };
     assert( dummy_nodes < (compressed_symbols - 1) );
     assert( 0 <= dummy_nodes );
+    assert( 1 == ((nonzero_text_symbols + dummy_nodes) % (compressed_symbols - 1)) );
     return dummy_nodes;
 }
 
@@ -985,9 +1004,20 @@ generate_huffman_tree(
     const int compressed_symbols, // 3 for trinary
     const int max_leaf_value
 ){
+    // FIXME: currently not ready to handle every byte is the same
+    // FIXME: currently not ready to handle empty files
+    assert( 2 <= max_leaf_value );
+    assert( (2*max_leaf_value) == list_length ); // FIXME: ???
     assert( 0 == list[0].count ); // FIXME: can't handle NULL bytes yet.
+    // ------------ snip -------------
+    // FIXME: support arbitrary size list_lengths and max_leaf_value amounts;
+    // FIXME: remove the fixed quantities between these scissor marks.
+    assert( 258 == max_leaf_value );
     assert( 0 == list[258].count );
-    assert(0 == list[259].count );
+    assert( 0 == list[259].count );
+    // ------------ end snip -------------
+    assert( 0 == list[max_leaf_value+1].count );
+    assert( 0 == list[max_leaf_value+2].count );
     // count out zero-frequency symbols
     int nonzero_text_symbols = 0;
     for( int i=0; i<(max_leaf_value+1); i++ ){
@@ -1015,7 +1045,11 @@ generate_huffman_tree(
         );
     
     printf("# max_leaf_value: %i\n", max_leaf_value);
-    for(int i=(max_leaf_value+1); i<(max_leaf_value + 1 + dummy_nodes); i++){
+    const int min_dummy_value = max_leaf_value + 1;
+    const int max_dummy_value = max_leaf_value + dummy_nodes;
+    // if exactly 1 dummy node, then min_dummy_value == max_dummy_value.
+    // If zero dummy nodes, then this entire loop is skipped.
+    for(int i=min_dummy_value; i<=max_dummy_value; i++){
         sorted_index[i] = i;
         list[i].count = 1; // minimum count for dummy nodes.
         // FUTURE: perhaps
@@ -1024,7 +1058,22 @@ generate_huffman_tree(
         // perhaps by scaling all the real node counts
         // by 2 or 3 or 10 or so.
     };
-    assert(1 == list[259].count ); // dummy node
+    if( 0 == dummy_nodes ){
+        // extra node one past any real leaf values
+        // that is currently zero
+        // but may later be set to non-zero
+        // and used as an internal node in the tree
+        assert(0 == list[max_leaf_value + 1].count );
+    }else{
+        assert( max_leaf_value + 1 == min_dummy_value );
+        assert(1 == list[min_dummy_value].count );
+        assert(1 == list[max_dummy_value].count );
+    };
+    // extra node one past any real leaf values
+    // that is currently zero
+    // but may later be set to non-zero
+    // and used as an internal node in the tree
+    assert( 0 == list[max_dummy_value + 1].count );
     assert( 1 == ((nonzero_text_symbols + dummy_nodes) % (compressed_symbols - 1)) );
     // ZQ
 
@@ -2375,7 +2424,7 @@ for human-readability, it compressed each English *word*
 into a "codeword" made only of letters
 using 52-ary Huffman coding (!)
 which it points out is "wildly inefficient".
-symbols are passed through unchanged.
+Punctuation symbols are passed through unchanged.
 Also,
 it points out that
 "Some words appear in the text only once (hapax legomena)."
@@ -3000,7 +3049,7 @@ void debug_lengths(
 }
 
 void test_huffman(void){
-    printf("Starting test_huffman()....\n");
+    printf("# Starting test_huffman()....\n");
     const int max_leaf_value = 258;
     int symbol_frequencies[max_leaf_value+1];
     int lengths[max_leaf_value+1];
@@ -3010,7 +3059,7 @@ void test_huffman(void){
     list_length: 516
     max_leaf_value: 258
     */
-    printf("  setting up test array....\n");
+    printf("#  setting up test array....\n");
     {
         for( int i=0; i<=max_leaf_value; i++ ){
             symbol_frequencies[ i ] = 0;
@@ -3023,7 +3072,7 @@ void test_huffman(void){
     };
     {
 
-        printf("testing trinary\n");
+        printf("#  testing trinary\n");
         // compressed using trinary
         huffman( 
             max_leaf_value,
